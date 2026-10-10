@@ -20,27 +20,35 @@ set -uo pipefail
 KEEP_GRADLE_DISTS=2          # ile najnowszych dystrybucji Gradle zostawić
 KEEP_KONAN=2                 # ile najnowszych toolchainów Kotlin/Native zostawić
 ARCHIVES_MAX_AGE_DAYS=180    # Xcode Archives starsze niż tyle dni → do przejrzenia
-MIN_SIZE_MB=50               # mniejsze pozycje pomijamy w listach
+MIN_SIZE_MB="${MIN_SIZE_MB:-50}"  # mniejsze pozycje pomijamy w listach (env nadpisuje — używają testy)
 # Gdzie szukać projektów (katalogi build/ i .gradle/ w projektach Gradle)
 PROJECT_ROOTS=("$HOME/Projects" "$HOME/Repozytorium" "$HOME/StudioProjects"
                "$HOME/AndroidStudioProjects" "$HOME/IdeaProjects" "$HOME/Developer" "$HOME/dev")
 
 usage() {
     cat <<'EOF'
-Użycie: miotla [--dry-run] [--help]
+Użycie: miotla [--auto] [--dry-run] [--json] [--help]
 
+  -a, --auto      tryb nieinteraktywny: sprząta tylko w 100% odtwarzalne
+                  cache (biała lista), bez żadnych pytań. Pod SwiftBar.
   -n, --dry-run   pokaż, co zostałoby usunięte, ale niczego nie usuwaj
+  -j, --json      (z --auto) wypisz wynik jako JSON zamiast linii RESULT
   -h, --help      ta pomoc
 
-Każda sekcja pyta: Enter = przejrzyj, p = pomiń.
-Listy pozycji:     w = wszystkie, p = po kolei, Enter = nic.
+Tryb interaktywny (bez --auto):
+  Każda sekcja pyta: Enter = przejrzyj, p = pomiń.
+  Listy pozycji:     w = wszystkie, p = po kolei, Enter = nic.
 EOF
 }
 
 DRY_RUN=0
+AUTO=0
+JSON=0
 for arg in "$@"; do
     case "$arg" in
+        -a|--auto) AUTO=1 ;;
         -n|--dry-run) DRY_RUN=1 ;;
+        -j|--json) JSON=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Nieznana opcja: $arg"; usage; exit 1 ;;
     esac
@@ -721,8 +729,131 @@ sec_report() {
 }
 
 # ════════════════════════════════════════
+#  TRYB --auto (nieinteraktywny, biała lista)
+# ════════════════════════════════════════
+# Kategorie --auto — zaślepki, wypełniane w kolejnym kroku.
+auto_npm_yarn() { :; }
+auto_brew()     { :; }
+auto_gradle()   { :; }
+auto_xcode()    { :; }
+auto_electron() { :; }
+auto_docker()   { :; }
+
+# Stałe ścieżki Miotły (nadpisywalne przez env — wykorzystują to testy).
+MIOTLA_CACHE="${MIOTLA_CACHE:-$HOME/Library/Caches/miotla}"
+MIOTLA_LOGS="${MIOTLA_LOGS:-$HOME/Library/Logs/miotla}"
+STATE_FILE="$MIOTLA_CACHE/state"
+LOCK_DIR="$MIOTLA_CACHE/lock"
+KEEP_LOGS=20                 # ile ostatnich logów --auto zostawić
+
+AUTO_SKIPPED=""              # tokeny pominiętych kategorii do linii RESULT
+auto_skip() {                # auto_skip token — zanotuj pominiętą kategorię
+    case " $AUTO_SKIPPED " in *" $1 "*) ;; *) AUTO_SKIPPED="${AUTO_SKIPPED:+$AUTO_SKIPPED,}$1" ;; esac
+}
+
+# Lock katalogowy (atomowy mkdir). Zwraca 1, gdy inne uruchomienie trwa.
+acquire_lock() {
+    local oldpid
+    mkdir -p "$MIOTLA_CACHE" 2>/dev/null || true
+    if mkdir "$LOCK_DIR" 2>/dev/null; then echo "$$" > "$LOCK_DIR/pid"; return 0; fi
+    oldpid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+    if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then return 1; fi
+    # Lock nieświeży (proces nie żyje) — przejmujemy.
+    rm -rf "$LOCK_DIR" 2>/dev/null
+    if mkdir "$LOCK_DIR" 2>/dev/null; then echo "$$" > "$LOCK_DIR/pid"; return 0; fi
+    return 1
+}
+release_lock() {  # usuń tylko własny lock
+    [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK_DIR" 2>/dev/null
+    return 0
+}
+
+drop_first() { awk -v n="$1" 'NR > n'; }   # wypisz wszystko poza pierwszymi N liniami
+rotate_logs() {   # zostaw ostatnie $KEEP_LOGS logów (nazwy są datowane, więc sort = chronologia)
+    local f
+    find "$MIOTLA_LOGS" -maxdepth 1 -name 'miotla-*.log' 2>/dev/null | sort -r | drop_first "$KEEP_LOGS" |
+    while IFS= read -r f; do rm -f "$f" 2>/dev/null; done
+}
+
+write_state() {   # write_state status freed_mb free_before free_after
+    local tmp
+    mkdir -p "$MIOTLA_CACHE" 2>/dev/null || true
+    tmp="$MIOTLA_CACHE/.state.$$"
+    {
+        echo "last_run_epoch=$(date '+%s')"
+        echo "last_run_human=$(date '+%Y-%m-%d %H:%M')"
+        echo "last_status=$1"
+        echo "last_freed_mb=$2"
+        echo "last_free_before_mb=$3"
+        echo "last_free_after_mb=$4"
+        echo "last_skipped=$AUTO_SKIPPED"
+    } > "$tmp" && mv -f "$tmp" "$STATE_FILE"
+}
+
+notify() {        # notify "treść"
+    command -v osascript >/dev/null 2>&1 || return 0
+    osascript -e "display notification \"$1\" with title \"Miotła\"" >/dev/null 2>&1 || true
+}
+
+emit_result() {   # emit_result status freed_mb free_before free_after
+    if [ "$JSON" -eq 1 ]; then
+        local arr="" tok
+        for tok in ${AUTO_SKIPPED//,/ }; do arr="${arr:+$arr,}\"$tok\""; done
+        printf '{"status":"%s","freed_mb":%s,"free_before_mb":%s,"free_after_mb":%s,"dry_run":%s,"skipped":[%s]}\n' \
+            "$1" "$2" "$3" "$4" "$DRY_RUN" "$arr"
+    else
+        printf 'RESULT status=%s freed_mb=%s free_before_mb=%s free_after_mb=%s dry_run=%s skipped=%s\n' \
+            "$1" "$2" "$3" "$4" "$DRY_RUN" "${AUTO_SKIPPED:-none}"
+    fi
+}
+
+run_auto() {
+    # SwiftBar odpala z okrojonym PATH — dołóż typowe lokalizacje narzędzi.
+    PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
+
+    mkdir -p "$MIOTLA_LOGS" 2>/dev/null || true
+    local log
+    log="$MIOTLA_LOGS/miotla-$(date '+%Y%m%d-%H%M%S').log"
+    # Wszystko (poza końcową linią wyniku) ląduje w logu i na stdout.
+    exec > >(tee -a "$log") 2>&1
+
+    if ! acquire_lock; then
+        echo "Miotła już działa (lock) — pomijam."
+        emit_result locked 0 0 0
+        return 0
+    fi
+    trap 'release_lock; rm -rf "$WORK"' EXIT
+
+    local free_before free_after freed
+    free_before=$(disk_free_mb)
+    echo "🧹 Miotła --auto$([ "$DRY_RUN" -eq 1 ] && echo ' --dry-run')  $(date '+%Y-%m-%d %H:%M')"
+    echo "Wolne przed: $(human "$free_before")"
+
+    auto_npm_yarn
+    auto_brew
+    auto_gradle
+    auto_xcode
+    auto_electron
+    auto_docker
+
+    free_after=$(disk_free_mb)
+    freed=$TOTAL_FREED
+    echo "Odzyskane (szacunek): $(human "$freed")  |  wolne po: $(human "$free_after")"
+
+    if [ "$DRY_RUN" -eq 0 ]; then
+        write_state ok "$freed" "$free_before" "$free_after"
+        if [ "$freed" -gt 0 ]; then notify "Odzyskano $(human "$freed")"; else notify "Nic do sprzątania"; fi
+    fi
+    rotate_logs
+    emit_result ok "$freed" "$free_before" "$free_after"
+    return 0
+}
+
+# ════════════════════════════════════════
 #  START
 # ════════════════════════════════════════
+if [ "$AUTO" -eq 1 ]; then run_auto; exit 0; fi
+
 echo ""
 echo "${BOLD}🧹 Miotła${NC}  $(date '+%Y-%m-%d %H:%M')"
 if [ "$DRY_RUN" -eq 1 ]; then echo "${YELLOW}${BOLD}  TRYB DRY-RUN — nic nie zostanie usunięte${NC}"; fi
