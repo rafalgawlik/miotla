@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wersja basha (na macOS to systemowy 3.2)
+        run: /bin/bash --version
+
+      - name: Instalacja shellcheck
+        run: brew install shellcheck
+
+      - name: Shellcheck
+        run: shellcheck -x -s bash bin/miotla swiftbar/*.sh install.sh uninstall.sh tests/*.sh
+
+      - name: Testy (systemowy bash 3.2)
+        run: /bin/bash tests/run.sh
