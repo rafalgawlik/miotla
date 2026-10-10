@@ -731,13 +731,175 @@ sec_report() {
 # ════════════════════════════════════════
 #  TRYB --auto (nieinteraktywny, biała lista)
 # ════════════════════════════════════════
-# Kategorie --auto — zaślepki, wypełniane w kolejnym kroku.
-auto_npm_yarn() { :; }
-auto_brew()     { :; }
-auto_gradle()   { :; }
-auto_xcode()    { :; }
-auto_electron() { :; }
-auto_docker()   { :; }
+# ── pomocnicze dla --auto ────────────────────────────────────
+auto_flush_list() {   # usuń wszystko z $WORK/list bez pytania (tryb --auto)
+    local size path desc
+    [ -s "$WORK/list" ] || return 0
+    while IFS=$'\t' read -r size path desc; do
+        safe_rm "$path" "$desc" "$size"
+    done < "$WORK/list"
+}
+est_to_mb() {         # "1.2GB"/"500MB"/"900kB"/"123B" → MB (liczba całkowita)
+    awk -v s="$1" 'BEGIN {
+        n = s + 0; u = toupper(s); gsub(/[0-9.,]/, "", u)
+        if      (index(u, "T") == 1) n *= 1048576
+        else if (index(u, "G") == 1) n *= 1024
+        else if (index(u, "M") == 1) ;          # już w MB
+        else if (index(u, "K") == 1) n /= 1024
+        else                         n /= 1048576   # czyste bajty
+        if (n < 0) n = 0; printf "%d", n }'
+}
+
+# ── kategorie --auto (biała lista: tylko w 100% odtwarzalne cache) ──
+auto_npm_yarn() {
+    echo "── npm / Yarn ──"
+    safe_rm "$HOME/.npm/_cacache" "Cache npm (_cacache)"
+    safe_rm "$HOME/.npm/_npx"     "Paczki npx (_npx)"
+    safe_rm "$HOME/Library/Caches/Yarn" "Cache Yarn"
+}
+
+auto_brew() {
+    command -v brew >/dev/null 2>&1 || { auto_skip brew_missing; return 0; }
+    local est mb
+    est=$(brew cleanup --prune=all -n 2>/dev/null | sed -nE 's/.*approximately ([^ ]+) of disk.*/\1/p')
+    mb=$(est_to_mb "${est:-0}")
+    echo "── Homebrew${est:+ (szac. $est)} ──"
+    if run_ok "Homebrew wyczyszczony" brew cleanup --prune=all; then
+        TOTAL_FREED=$((TOTAL_FREED + mb))
+    fi
+}
+
+auto_gradle() {
+    local caches="$GRADLE_HOME/caches" dists="$GRADLE_HOME/wrapper/dists"
+    local d n v prefix max keep_versions=""
+    [ -d "$GRADLE_HOME" ] || return 0
+    if pgrep -f 'GradleDaemon|KotlinCompileDaemon' >/dev/null 2>&1; then
+        echo "── Gradle: działa daemon — pomijam (nie zabijam) ──"
+        auto_skip gradle_daemon
+        return 0
+    fi
+    echo "── Gradle ──"
+    safe_rm "$GRADLE_HOME/daemon" "Logi daemonów Gradle"
+
+    # Stare dystrybucje wrappera — zostaw KEEP_GRADLE_DISTS najnowszych wg numeru wersji
+    if [ -d "$dists" ]; then
+        for d in "$dists"/gradle-*; do
+            [ -d "$d" ] || continue
+            n=$(basename "$d")
+            v=$(printf '%s' "$n" | sed -E 's/^gradle-([0-9]+(\.[0-9]+)*).*/\1/')
+            printf '%s\t%s\n' "$v" "$n"
+        done | vsort > "$WORK/dists"
+        keep_versions=$(tail -n "$KEEP_GRADLE_DISTS" "$WORK/dists" | cut -f1)
+        new_list
+        while IFS=$'\t' read -r v n; do
+            add_item "$dists/$n" "Dystrybucja Gradle $v ($n)" 1
+        done < <(drop_last "$KEEP_GRADLE_DISTS" < "$WORK/dists")
+        auto_flush_list
+    fi
+
+    # Cache konkretnych wersji Gradle (caches/8.9 itd.) poza zostawionymi
+    if [ -n "$keep_versions" ] && [ -d "$caches" ]; then
+        new_list
+        for d in "$caches"/[0-9]*; do
+            [ -d "$d" ] || continue
+            v=$(basename "$d")
+            if printf '%s\n' "$keep_versions" | grep -qxF "$v"; then continue; fi
+            add_item "$d" "cache Gradle $v" 1
+        done
+        auto_flush_list
+    fi
+
+    # Stare generacje wspólnego cache (np. transforms-3 obok transforms-4)
+    if [ -d "$caches" ]; then
+        new_list
+        for prefix in transforms jars modules; do
+            max=$(for d in "$caches/$prefix"-[0-9]*; do
+                      [ -d "$d" ] && echo "${d##*-}"
+                  done | sort -n | tail -1)
+            [ -n "$max" ] || continue
+            for d in "$caches/$prefix"-[0-9]*; do
+                [ -d "$d" ] || continue
+                [ "${d##*-}" = "$max" ] && continue
+                add_item "$d" "$(basename "$d") (stary format, aktualny: $prefix-$max)" 1
+            done
+        done
+        auto_flush_list
+        # build-cache jest w 100% odtwarzalny — usuwamy w całości
+        for d in "$caches"/build-cache-*; do
+            [ -d "$d" ] && safe_rm "$d" "Gradle build cache ($(basename "$d"))"
+        done
+    fi
+}
+
+auto_xcode() {
+    local x="$HOME/Library/Developer/Xcode" d
+    echo "── Xcode ──"
+    new_list
+    for d in "$x/DerivedData"/*; do
+        [ -d "$d" ] && add_item "$d" "DerivedData/$(basename "$d")" 1
+    done
+    auto_flush_list
+    safe_rm "$HOME/Library/Caches/com.apple.dt.Xcode" "Cache Xcode"
+    safe_rm "$HOME/Library/Caches/org.swift.swiftpm"  "Cache Swift Package Manager"
+    safe_rm "$HOME/Library/Developer/CoreSimulator/Caches" "Cache symulatorów (CoreSimulator/Caches)"
+    if command -v xcrun >/dev/null 2>&1; then
+        run_ok "Usunięto niedostępne symulatory" xcrun simctl delete unavailable
+    fi
+}
+
+auto_electron() {
+    local as="$HOME/Library/Application Support" app n d skipped_any=0
+    echo "── Electron ──"
+    new_list
+    for app in "$as"/*; do
+        [ -d "$app" ] || continue
+        n=$(basename "$app")
+        case "$n" in
+            Google|BraveSoftware|Firefox|Mozilla|Arc|Microsoft\ Edge*|Vivaldi|com.operasoftware.*) continue ;;
+            Signal|WhatsApp|Telegram*|MobileSync|AddressBook|CallHistoryDB|Knowledge|com.apple.*) continue ;;
+        esac
+        # tylko aplikacje oparte na Chromium (mają katalog „Code Cache")
+        [ -n "$(find "$app" -maxdepth 4 -type d -name 'Code Cache' -print 2>/dev/null | head -1)" ] || continue
+        # pomiń uruchomione aplikacje (zachowawczo: gdy proces pasuje do nazwy — pomijamy)
+        if pgrep -i "$n" >/dev/null 2>&1; then
+            echo "  - $n (uruchomione — pomijam)"
+            skipped_any=1
+            continue
+        fi
+        while IFS= read -r d; do
+            add_item "$d" "${d#"$as"/}" 1
+        done < <(find "$app" -maxdepth 5 -type d \( -name Cache -o -name 'Code Cache' -o -name GPUCache \
+                    -o -name DawnCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \
+                    -o -name CacheStorage -o -name ScriptCache -o -name CachedData \
+                    -o -name CachedExtensionVSIXs -o -name Crashpad \) -prune 2>/dev/null)
+    done
+    [ "$skipped_any" -eq 1 ] && auto_skip electron_running
+    auto_flush_list
+}
+
+auto_docker() {
+    command -v docker >/dev/null 2>&1 || { auto_skip docker_missing; return 0; }
+    if ! docker info >/dev/null 2>&1; then
+        echo "── Docker nie działa — pomijam ──"
+        auto_skip docker_down
+        return 0
+    fi
+    echo "── Docker ──"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        print_info "[dry-run] docker builder prune -f"
+        print_info "[dry-run] docker image prune -f"
+        return 0
+    fi
+    local sub out mb total=0
+    for sub in builder image; do
+        out=$(docker "$sub" prune -f 2>/dev/null)
+        printf '%s\n' "$out" | sed 's/^/    /'
+        mb=$(printf '%s\n' "$out" | sed -nE 's/.*(reclaimed space|Total):[[:space:]]*([0-9.,]+[KMGTkmgt]?B).*/\2/p' | tail -1)
+        [ -n "$mb" ] && total=$((total + $(est_to_mb "$mb")))
+    done
+    TOTAL_FREED=$((TOTAL_FREED + total))
+    print_ok "Docker wyczyszczony (wiszące obrazy + cache buildów, ~$(human "$total"))"
+}
 
 # Stałe ścieżki Miotły (nadpisywalne przez env — wykorzystują to testy).
 MIOTLA_CACHE="${MIOTLA_CACHE:-$HOME/Library/Caches/miotla}"
@@ -809,7 +971,9 @@ emit_result() {   # emit_result status freed_mb free_before free_after
 
 run_auto() {
     # SwiftBar odpala z okrojonym PATH — dołóż typowe lokalizacje narzędzi.
-    PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
+    # Dokładamy na KOŃCU: brew/docker są tylko tutaj, a ewentualne atrapy
+    # z wcześniejszej części PATH (testy) pozostają nadrzędne.
+    PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; export PATH
 
     mkdir -p "$MIOTLA_LOGS" 2>/dev/null || true
     local log

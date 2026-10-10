@@ -41,6 +41,20 @@ make_stub() {
     chmod +x "$STUB_BIN/$name"
 }
 
+# make_pgrep "token1 token2" — stub pgrep: zwraca 0 (znaleziono), gdy ostatni
+# argument zawiera któryś z tokenów; inaczej 1. Pusty argument = nic nie działa.
+make_pgrep() {
+    {
+        echo '#!/bin/bash'
+        echo "echo \"pgrep \$*\" >> \"$CALL_LOG\""
+        # shellcheck disable=SC2016  # celowo literał — to kod generowanej atrapy
+        echo 'for a in "$@"; do last="$a"; done'
+        echo "for t in $1; do case \"\$last\" in *\"\$t\"*) exit 0 ;; esac; done"
+        echo 'exit 1'
+    } > "$STUB_BIN/pgrep"
+    chmod +x "$STUB_BIN/pgrep"
+}
+
 # mkfile_mb ŚCIEŻKA MB — utwórz plik o podanym rozmiarze (realne bajty, nie sparse)
 mkfile_mb() {
     mkdir -p "$(dirname "$1")"
