@@ -1,0 +1,767 @@
+#!/bin/bash
+# shellcheck disable=SC2088,SC1111  # „~” i polskie cudzysłowy w komunikatach są celowo dosłowne
+# ============================================================
+#  Miotła — Docker, Gradle/Android/KMP, Xcode/iOS (w tym
+#  runtime'y symulatorów), cache narzędzi, cache aplikacji Electron
+#  (Notion, Teams, Claude, VS Code…), Kosz, Claude Code, System Data
+#  dev-node.com / Rafał Gawlik
+#
+#  NIE dotyka: przeglądarek (Brave, Chrome, Firefox, Safari, Arc),
+#  danych Signala/WhatsAppa, ~/.gradle/gradle.properties,
+#  ustawień i logowania Claude Code.
+#  Nic nie usuwa bez pytania. Kasuje wyłącznie wewnątrz $HOME
+#  (wyjątki przez sudo, po pytaniu: snapshoty Time Machine, sleepimage).
+#  Działa na systemowym bashu 3.2.
+# ============================================================
+
+set -uo pipefail
+
+# ─── Ustawienia ──────────────────────────────────────────────
+KEEP_GRADLE_DISTS=2          # ile najnowszych dystrybucji Gradle zostawić
+KEEP_KONAN=2                 # ile najnowszych toolchainów Kotlin/Native zostawić
+ARCHIVES_MAX_AGE_DAYS=180    # Xcode Archives starsze niż tyle dni → do przejrzenia
+MIN_SIZE_MB=50               # mniejsze pozycje pomijamy w listach
+# Gdzie szukać projektów (katalogi build/ i .gradle/ w projektach Gradle)
+PROJECT_ROOTS=("$HOME/Projects" "$HOME/Repozytorium" "$HOME/StudioProjects"
+               "$HOME/AndroidStudioProjects" "$HOME/IdeaProjects" "$HOME/Developer" "$HOME/dev")
+
+usage() {
+    cat <<'EOF'
+Użycie: miotla [--dry-run] [--help]
+
+  -n, --dry-run   pokaż, co zostałoby usunięte, ale niczego nie usuwaj
+  -h, --help      ta pomoc
+
+Każda sekcja pyta: Enter = przejrzyj, p = pomiń.
+Listy pozycji:     w = wszystkie, p = po kolei, Enter = nic.
+EOF
+}
+
+DRY_RUN=0
+for arg in "$@"; do
+    case "$arg" in
+        -n|--dry-run) DRY_RUN=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Nieznana opcja: $arg"; usage; exit 1 ;;
+    esac
+done
+
+if [ "$(uname -s)" != "Darwin" ]; then
+    echo "Ten skrypt jest przeznaczony dla macOS."
+    exit 1
+fi
+
+if [ -t 1 ]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; NC=''
+fi
+
+# Odpowiedzi czytamy z terminala (fd 3), a nie ze stdin — dzięki temu pytania
+# działają też wewnątrz pętli „while read”, które czytają listy plików.
+if (exec </dev/tty) 2>/dev/null; then exec 3</dev/tty; else exec 3<&0; fi
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/miotla.XXXXXX") || exit 1
+trap 'rm -rf "$WORK"' EXIT
+
+TOTAL_FREED=0
+
+# ─── Wypisywanie ─────────────────────────────────────────────
+print_header() {
+    echo ""
+    echo "${CYAN}${BOLD}════════════════════════════════════════${NC}"
+    echo "${CYAN}${BOLD}  $1${NC}"
+    echo "${CYAN}${BOLD}════════════════════════════════════════${NC}"
+}
+print_ok()   { echo "${GREEN}  ✓ $1${NC}"; }
+print_warn() { echo "${YELLOW}  ⚠ $1${NC}"; }
+print_err()  { echo "${RED}  ✗ $1${NC}"; }
+print_skip() { echo "  - $1 ${YELLOW}(pominięto)${NC}"; }
+print_info() { echo "  ℹ $1"; }
+
+# ─── Pytania ─────────────────────────────────────────────────
+ask() {      # ask "pytanie" → odpowiedź na stdout
+    local ans=""
+    printf '%s' "$1" >&2
+    IFS= read -r ans <&3 || ans=""
+    printf '%s' "$ans"
+}
+confirm() {  # confirm "pytanie" → 0 dla y/t
+    case "$(ask "  $1 (y/N): ")" in y|Y|t|T|tak|TAK) return 0 ;; *) return 1 ;; esac
+}
+section() {  # section "tytuł" → 0 = przeglądamy, 1 = pomijamy
+    print_header "$1"
+    case "$(ask "  Enter = przejrzyj, p = pomiń sekcję: ")" in
+        p|P|s|S) print_skip "sekcja"; return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# ─── Rozmiary i wersje ───────────────────────────────────────
+size_mb() {
+    local s=""
+    if [ -e "$1" ]; then s=$(du -sm "$1" 2>/dev/null | awk 'END { print $1 + 0 }'); fi
+    echo "${s:-0}"
+}
+human() {
+    awk -v m="$1" 'BEGIN { a = (m < 0 ? -m : m); s = (m < 0 ? "-" : "");
+        if (a >= 1024) printf "%s%.1f GB", s, a / 1024; else printf "%s%d MB", s, a }'
+}
+short() { case "$1" in "$HOME"*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
+disk_free_mb() { df -m "$HOME" | awk 'NR == 2 { print $4 }'; }
+
+vsort() {      # stdin: "wersja<TAB>reszta" → posortowane rosnąco po numerze wersji
+    awk -F'\t' '{ n = split($1, p, "."); k = "";
+        for (i = 1; i <= 4; i++) k = k sprintf("%06d", (i <= n ? p[i] + 0 : 0));
+        print k "\t" $0 }' | sort | cut -f2-
+}
+drop_last() {  # wypisz wszystko poza ostatnimi N liniami
+    awk -v n="$1" '{ l[NR] = $0 } END { for (i = 1; i <= NR - n; i++) print l[i] }'
+}
+
+# ─── Usuwanie ────────────────────────────────────────────────
+safe_rm() {  # safe_rm ścieżka opis [rozmiar_mb]
+    local path="$1" desc="$2" size="${3:-}"
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then print_skip "$desc (nie istnieje)"; return 0; fi
+    case "$path" in
+        "$HOME"/?*) ;;
+        *) print_err "Odmowa: $path leży poza katalogiem domowym"; return 1 ;;
+    esac
+    case "$path" in *"/../"*) print_err "Odmowa: podejrzana ścieżka $path"; return 1 ;; esac
+    [ -n "$size" ] || size=$(size_mb "$path")
+    if [ "$DRY_RUN" -eq 1 ]; then
+        print_info "[dry-run] usunąłbym: $desc (~$(human "$size"))"
+        TOTAL_FREED=$((TOTAL_FREED + size))
+        return 0
+    fi
+    if rm -rf "$path" 2>/dev/null; then
+        TOTAL_FREED=$((TOTAL_FREED + size))
+        print_ok "Usunięto: $desc (~$(human "$size"))"
+    else
+        print_err "Nie udało się usunąć (całości): $desc — brak uprawnień?"
+    fi
+}
+
+ask_rm() {   # ask_rm ścieżka opis [ostrzeżenie]
+    local path="$1" desc="$2" warn="${3:-}" size
+    if [ ! -e "$path" ]; then print_skip "$desc (nie istnieje)"; return 0; fi
+    size=$(size_mb "$path")
+    if [ "$size" -lt 1 ]; then print_skip "$desc (pusty)"; return 0; fi
+    echo "  ${YELLOW}$(human "$size") — $desc${NC}"
+    if [ -n "$warn" ]; then print_warn "$warn"; fi
+    if confirm "Usunąć?"; then safe_rm "$path" "$desc" "$size"; fi
+    return 0
+}
+
+run_ok() {   # run_ok "opis sukcesu" polecenie... (w dry-run tylko pokazuje polecenie)
+    local desc="$1"; shift
+    if [ "$DRY_RUN" -eq 1 ]; then print_info "[dry-run] $*"; return 0; fi
+    if "$@"; then print_ok "$desc"; return 0; fi
+    print_err "Nie powiodło się: $*"
+    return 1
+}
+
+# Listy kandydatów: zbierz → pokaż z rozmiarami → zapytaj raz (wszystkie / po kolei / nic)
+new_list() { : > "$WORK/list"; }
+add_item() {  # add_item ścieżka opis [min_mb]
+    local size
+    size=$(size_mb "$1")
+    [ "$size" -ge "${3:-$MIN_SIZE_MB}" ] || return 0
+    printf '%s\t%s\t%s\n' "$size" "$1" "$2" >> "$WORK/list"
+}
+review_list() {  # review_list "tytuł" ["ostrzeżenie"]
+    local title="$1" warn="${2:-}" total=0 size path desc
+    if [ ! -s "$WORK/list" ]; then print_info "$title: nic do usunięcia"; return 0; fi
+    sort -t$'\t' -k1,1nr -o "$WORK/list" "$WORK/list"
+    echo "  ${CYAN}$title:${NC}"
+    while IFS=$'\t' read -r size path desc; do
+        printf '    %10s  %s\n' "$(human "$size")" "$desc"
+        total=$((total + size))
+    done < "$WORK/list"
+    echo "    ${BOLD}razem: $(human "$total")${NC}"
+    if [ -n "$warn" ]; then print_warn "$warn"; fi
+    case "$(ask "  Usunąć? [w]szystkie / [p]o kolei / [N]ic: ")" in
+        w|W|a|A)
+            while IFS=$'\t' read -r size path desc; do
+                safe_rm "$path" "$desc" "$size"
+            done < "$WORK/list" ;;
+        p|P|e|E)
+            while IFS=$'\t' read -r size path desc; do
+                if confirm "$desc ($(human "$size"))?"; then safe_rm "$path" "$desc" "$size"; fi
+            done < "$WORK/list" ;;
+        *) print_skip "$title" ;;
+    esac
+}
+
+# ════════════════════════════════════════
+#  SEKCJE
+# ════════════════════════════════════════
+
+sec_docker() {
+    local d
+    if ! command -v docker >/dev/null 2>&1; then print_skip "Docker (nie zainstalowany)"; return 0; fi
+    for d in "$HOME/Library/Containers/com.docker.docker" "$HOME/.orbstack"; do
+        if [ -d "$d" ]; then print_info "Dane $(short "$d"): $(human "$(size_mb "$d")")"; fi
+    done
+    if ! docker info >/dev/null 2>&1; then
+        print_warn "Docker nie działa — uruchom Docker Desktop (lub OrbStack) i odpal skrypt ponownie."
+        return 0
+    fi
+    docker system df 2>/dev/null | sed 's/^/    /'
+    if confirm "docker system prune -a: nieużywane obrazy, zatrzymane kontenery, sieci, cache buildów? (wolumeny zostają)"; then
+        run_ok "Docker wyczyszczony" docker system prune -a -f
+    fi
+    print_info "Docker Desktop oddaje miejsce z opóźnieniem (czasem po restarcie)."
+    print_info "Twardy limit dysku: Docker Desktop → Settings → Resources."
+    return 0
+}
+
+GRADLE_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
+
+ensure_gradle_stopped() {
+    pgrep -f 'GradleDaemon|KotlinCompileDaemon' >/dev/null 2>&1 || return 0
+    print_warn "Działają daemony Gradle/Kotlin — usuwanie cache w trakcie buildu może go zepsuć."
+    if confirm "Zatrzymać je teraz (przerwie trwające buildy)?"; then
+        run_ok "Daemony zatrzymane" pkill -f 'GradleDaemon|KotlinCompileDaemon'
+        [ "$DRY_RUN" -eq 1 ] || sleep 2
+        return 0
+    fi
+    return 1
+}
+
+sec_gradle() {
+    local caches="$GRADLE_HOME/caches" dists="$GRADLE_HOME/wrapper/dists"
+    local d n v mb p prefix max keep_versions=""
+    if [ ! -d "$GRADLE_HOME" ]; then print_skip "Gradle (brak $(short "$GRADLE_HOME"))"; return 0; fi
+    ensure_gradle_stopped || { print_skip "Gradle (daemony działają)"; return 0; }
+
+    if [ -d "$caches" ]; then
+        echo "  ~/.gradle/caches: ${BOLD}$(human "$(size_mb "$caches")")${NC}, największe:"
+        du -sm "$caches"/* 2>/dev/null | sort -rn | head -6 | while read -r mb p; do
+            printf '    %10s  %s\n' "$(human "$mb")" "$(basename "$p")"
+        done
+    fi
+
+    # Dystrybucje wrappera — zostaw N najnowszych wg numeru wersji (nie wg daty)
+    if [ -d "$dists" ]; then
+        for d in "$dists"/gradle-*; do
+            [ -d "$d" ] || continue
+            n=$(basename "$d")
+            v=$(printf '%s' "$n" | sed -E 's/^gradle-([0-9]+(\.[0-9]+)*).*/\1/')
+            printf '%s\t%s\n' "$v" "$n"
+        done | vsort > "$WORK/dists"
+        keep_versions=$(tail -n "$KEEP_GRADLE_DISTS" "$WORK/dists" | cut -f1)
+        if [ -n "$keep_versions" ]; then
+            print_info "Zostawiam Gradle: $(printf '%s' "$keep_versions" | tr '\n' ' ')"
+        fi
+        new_list
+        while IFS=$'\t' read -r v n; do
+            add_item "$dists/$n" "Gradle $v ($n)" 1
+        done < <(drop_last "$KEEP_GRADLE_DISTS" < "$WORK/dists")
+        review_list "Starsze dystrybucje Gradle" "Projekt na starszym Gradle pobierze go ponownie (~150 MB)."
+    fi
+
+    # Cache konkretnych wersji Gradle (caches/8.9 itd.) poza zostawionymi
+    if [ -n "$keep_versions" ] && [ -d "$caches" ]; then
+        new_list
+        for d in "$caches"/[0-9]*; do
+            [ -d "$d" ] || continue
+            v=$(basename "$d")
+            if printf '%s\n' "$keep_versions" | grep -qxF "$v"; then continue; fi
+            add_item "$d" "cache Gradle $v"
+        done
+        review_list "Cache starszych wersji Gradle" "Odtworzy się, jeśli któryś projekt nadal używa tej wersji."
+    fi
+
+    # Stare generacje wspólnego cache (np. transforms-3 obok transforms-4)
+    if [ -d "$caches" ]; then
+        new_list
+        for prefix in transforms jars modules build-cache; do
+            max=$(for d in "$caches/$prefix"-[0-9]*; do
+                      [ -d "$d" ] && echo "${d##*-}"
+                  done | sort -n | tail -1)
+            [ -n "$max" ] || continue
+            for d in "$caches/$prefix"-[0-9]*; do
+                [ -d "$d" ] || continue
+                [ "${d##*-}" = "$max" ] && continue
+                add_item "$d" "$(basename "$d") (stary format, aktualny: $prefix-$max)"
+            done
+        done
+        review_list "Stare generacje cache Gradle"
+
+        for d in "$caches"/build-cache-*; do
+            [ -d "$d" ] || continue
+            ask_rm "$d" "Gradle build cache ($(basename "$d"))" "Bezpieczne — wyniki tasków zbudują się od nowa."
+        done
+    fi
+    ask_rm "$GRADLE_HOME/daemon" "Logi daemonów Gradle"
+    ask_rm "$caches" "CAŁY ~/.gradle/caches" \
+        "Następny build każdego projektu pobierze wszystkie zależności od nowa (długo)."
+    return 0
+}
+
+sec_projects() {
+    local root d parent found=0
+    ensure_gradle_stopped || { print_skip "Projekty (daemony działają)"; return 0; }
+    new_list
+    for root in "${PROJECT_ROOTS[@]}"; do
+        [ -d "$root" ] || continue
+        found=1
+        print_info "Skanuję $(short "$root")..."
+        while IFS= read -r d; do
+            parent=$(dirname "$d")
+            if [ -f "$parent/build.gradle.kts" ] || [ -f "$parent/build.gradle" ] ||
+               [ -f "$parent/settings.gradle.kts" ] || [ -f "$parent/settings.gradle" ]; then
+                add_item "$d" "$(short "$d")"
+            fi
+        done < <(find "$root" -maxdepth 6 \( -name node_modules -o -name .git -o -name Pods \) -prune \
+                    -o -type d \( -name build -o -name .gradle \) -print -prune 2>/dev/null)
+    done
+    if [ "$found" -eq 0 ]; then
+        print_info "Nie znalazłem katalogów z projektami — ustaw PROJECT_ROOTS na górze skryptu."
+        return 0
+    fi
+    review_list "Wyniki buildów (build/, .gradle/) w projektach Gradle" \
+        "Zbudują się od nowa przy następnym buildzie danego projektu."
+    return 0
+}
+
+add_old_ide_versions() {  # dla każdego IDE zostaw najnowszy folder, starsze → lista
+    local base="$1" d n ver prefix
+    [ -d "$base" ] || return 0
+    : > "$WORK/ide"
+    for d in "$base"/*; do
+        [ -d "$d" ] || continue
+        n=$(basename "$d")
+        ver=$(printf '%s' "$n" | sed -nE 's/^[A-Za-z]+([0-9]{4}\.[0-9]+(\.[0-9]+)?)$/\1/p')
+        [ -n "$ver" ] || continue
+        prefix=${n%"$ver"}
+        printf '%s\t%s\t%s\n' "$prefix" "$ver" "$n" >> "$WORK/ide"
+    done
+    cut -f1 "$WORK/ide" | sort -u | while IFS= read -r prefix; do
+        awk -F'\t' -v p="$prefix" '$1 == p { print $2 "\t" $3 }' "$WORK/ide" | vsort | drop_last 1
+    done > "$WORK/ide_old"
+    while IFS=$'\t' read -r ver n; do
+        add_item "$base/$n" "$(short "$base/$n")"
+    done < "$WORK/ide_old"
+}
+
+sec_android() {
+    local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+    local avd_dir="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+    local konan="${KONAN_DATA_DIR:-$HOME/.konan}"
+    local avd name size snap img rel d n v base
+
+    # Emulatory: pytanie o każdy osobno (usuń / same snapshoty / zostaw)
+    if [ -d "$avd_dir" ]; then
+        if pgrep -f 'qemu-system' >/dev/null 2>&1; then
+            print_warn "Działa emulator — pomijam AVD (zamknij emulatory i uruchom skrypt ponownie)."
+        else
+            echo "  ${CYAN}Emulatory (AVD):${NC}"
+            for avd in "$avd_dir"/*.avd; do
+                [ -d "$avd" ] || continue
+                name=$(basename "$avd" .avd)
+                size=$(size_mb "$avd"); snap=$(size_mb "$avd/snapshots")
+                printf '    %10s  %s (snapshoty: %s)\n' "$(human "$size")" "$name" "$(human "$snap")"
+                case "$(ask "    [u]suń emulator / [s]napshoty (cold boot) / [N]ic: ")" in
+                    u|U) safe_rm "$avd" "AVD $name" "$size"
+                         safe_rm "$avd_dir/$name.ini" "AVD $name (.ini)" 0 ;;
+                    s|S) safe_rm "$avd/snapshots" "Snapshoty AVD $name" "$snap" ;;
+                    *) ;;
+                esac
+            done
+            print_info "Emulatory, które zostają, odchudzisz w Android Studio: Device Manager → Wipe Data."
+        fi
+    fi
+
+    # Obrazy systemu, których nie używa żaden emulator
+    if [ -d "$sdk/system-images" ]; then
+        new_list
+        for img in "$sdk"/system-images/*/*/*; do
+            [ -d "$img" ] || continue
+            rel="${img#"$sdk"/}"
+            if grep -qsF "$rel" "$avd_dir"/*.avd/config.ini 2>/dev/null; then continue; fi
+            add_item "$img" "$rel"
+        done
+        review_list "Obrazy systemu Android nieużywane przez żaden emulator"
+    fi
+
+    # NDK
+    new_list
+    for d in "$sdk"/ndk/*; do
+        [ -d "$d" ] && add_item "$d" "NDK $(basename "$d")"
+    done
+    if [ -d "$sdk/ndk-bundle" ]; then add_item "$sdk/ndk-bundle" "NDK (stary ndk-bundle)"; fi
+    review_list "Android NDK" "Projekt z ndkVersion ustawionym na usuniętą wersję poprosi o ponowną instalację."
+
+    ask_rm "$sdk/.temp" "Pliki tymczasowe Android SDK"
+    ask_rm "$HOME/.android/cache" "Cache narzędzi Android"
+
+    # Foldery starych wersji Android Studio / IDE JetBrains (Chrome itp. nie są ruszane)
+    new_list
+    for base in "$HOME/Library/Caches/Google" "$HOME/Library/Application Support/Google" \
+                "$HOME/Library/Logs/Google" "$HOME/Library/Caches/JetBrains" \
+                "$HOME/Library/Application Support/JetBrains" "$HOME/Library/Logs/JetBrains"; do
+        add_old_ide_versions "$base"
+    done
+    review_list "Foldery starszych wersji Android Studio / IDE JetBrains" \
+        "Najnowsza wersja każdego IDE zostaje — usuwane są tylko foldery wcześniejszych wersji."
+
+    # Kotlin/Native: zostaw N najnowszych toolchainów
+    if [ -d "$konan" ]; then
+        for d in "$konan"/kotlin-native-*; do
+            [ -d "$d" ] || continue
+            n=$(basename "$d")
+            v=$(printf '%s' "$n" | sed -E 's/^kotlin-native-(prebuilt-)?[^-]+-[^-]+-//')
+            printf '%s\t%s\n' "$v" "$n"
+        done | vsort | drop_last "$KEEP_KONAN" > "$WORK/konan"
+        new_list
+        while IFS=$'\t' read -r v n; do
+            add_item "$konan/$n" "Kotlin/Native $v" 1
+        done < "$WORK/konan"
+        review_list "Starsze toolchainy Kotlin/Native (~/.konan)" \
+            "Projekt na starszym Kotlinie pobierze toolchain ponownie."
+    fi
+    return 0
+}
+
+sec_xcode() {
+    local x="$HOME/Library/Developer/Xcode" d platform rid rlabel
+    local bk="$HOME/Library/Application Support/MobileSync/Backup"
+
+    new_list
+    for d in "$x/DerivedData"/*; do
+        [ -d "$d" ] && add_item "$d" "DerivedData/$(basename "$d")"
+    done
+    review_list "Xcode DerivedData" "Bezpieczne — Xcode zbuduje od nowa (pierwszy build potrwa dłużej)."
+
+    new_list
+    for platform in "iOS DeviceSupport" "watchOS DeviceSupport" "tvOS DeviceSupport" "visionOS DeviceSupport"; do
+        for d in "$x/$platform"/*; do
+            [ -d "$d" ] && add_item "$d" "$platform/$(basename "$d")"
+        done
+    done
+    review_list "Symbole urządzeń (DeviceSupport)" \
+        "Xcode skopiuje je ponownie po podłączeniu urządzenia z tą wersją systemu."
+
+    new_list
+    while IFS= read -r d; do
+        add_item "$d" "Archives/$(basename "$d")" 1
+    done < <(find "$x/Archives" -mindepth 1 -maxdepth 1 -type d -mtime +"$ARCHIVES_MAX_AGE_DAYS" 2>/dev/null)
+    review_list "Xcode Archives starsze niż $ARCHIVES_MAX_AGE_DAYS dni" \
+        "Zawierają dSYM — bez nich nie zsymbolikujesz crashy z tych wydań (chyba że są w Crashlytics)."
+
+    ask_rm "$HOME/Library/Caches/com.apple.dt.Xcode" "Cache Xcode"
+    ask_rm "$HOME/Library/Caches/org.swift.swiftpm" "Cache Swift Package Manager"
+    ask_rm "$HOME/Library/Caches/CocoaPods" "Cache CocoaPods"
+
+    if command -v xcrun >/dev/null 2>&1; then
+        # Runtime'y (obrazy systemów dla symulatorów) — leżą poza ~, każdy to kilka GB.
+        # Najpierw one: po usunięciu runtime'u jego symulatory stają się „unavailable”.
+        xcrun simctl runtime list 2>/dev/null > "$WORK/runtimes"
+        if grep -qE ' - [0-9A-Fa-f-]{36} ' "$WORK/runtimes"; then
+            echo "  ${CYAN}Runtime'y symulatorów:${NC}"
+            grep -E ' - [0-9A-Fa-f-]{36} |^-- |^Total' "$WORK/runtimes" | sed 's/^/    /'
+            print_info "Zostaw runtime, którego używa Twój Xcode (zwykle najnowszy dla danej platformy)."
+            while IFS=$'\t' read -r rid rlabel; do
+                if confirm "Usunąć runtime $rlabel?"; then
+                    run_ok "Usunięto runtime $rlabel" xcrun simctl runtime delete "$rid"
+                fi
+            done < <(sed -nE 's/^[[:space:]]*(.+) - ([0-9A-Fa-f-]{36}) .*$/\2\t\1/p' "$WORK/runtimes")
+        fi
+
+        print_info "Symulatory (CoreSimulator): $(human "$(size_mb "$HOME/Library/Developer/CoreSimulator")")"
+        if confirm "Usunąć symulatory dla niezainstalowanych wersji iOS (simctl delete unavailable)?"; then
+            run_ok "Usunięto niedostępne symulatory" xcrun simctl delete unavailable
+        fi
+        if confirm "Wyczyścić zawartość WSZYSTKICH symulatorów (zainstalowane w nich apki i dane znikną)?"; then
+            [ "$DRY_RUN" -eq 1 ] || xcrun simctl shutdown all >/dev/null 2>&1
+            run_ok "Symulatory wyczyszczone" xcrun simctl erase all
+        fi
+        ask_rm "$HOME/Library/Developer/CoreSimulator/Caches" "Cache symulatorów (dyld)"
+    fi
+
+    if [ -d "$bk" ]; then
+        print_info "Kopie zapasowe iPhone'a: $(human "$(size_mb "$bk")") — zarządzasz nimi w Finderze (iPhone → Zarządzaj kopiami zapasowymi)."
+    fi
+    return 0
+}
+
+sec_tools() {
+    local est d
+    ask_rm "$HOME/.npm/_cacache" "Cache npm" "Paczki pobiorą się ponownie przy następnym npm install."
+    ask_rm "$HOME/.npm/_npx" "Paczki uruchamiane przez npx (np. serwery MCP)" "Pobiorą się ponownie przy następnym npx."
+    ask_rm "$HOME/Library/Caches/Yarn" "Cache Yarn"
+    ask_rm "$HOME/.dartServer" "Cache serwera analizy Dart/Flutter" "Odbuduje się przy następnym otwarciu projektu Dart/Flutter."
+    ask_rm "$HOME/.pub-cache" "Pakiety Dart/Flutter (pub cache)" "Projekty pobiorą pakiety ponownie przy flutter pub get."
+
+    if command -v brew >/dev/null 2>&1; then
+        print_info "Homebrew: liczę, ile da się odzyskać..."
+        est=$(brew cleanup --prune=all -n 2>/dev/null | sed -nE 's/.*approximately ([^ ]+) of disk.*/\1/p')
+        if [ -n "$est" ]; then
+            if confirm "Homebrew: usunąć stare wersje i pobrane instalatory (~$est)?"; then
+                run_ok "Homebrew wyczyszczony" brew cleanup --prune=all
+            fi
+        else
+            print_skip "Homebrew (nic do sprzątania)"
+        fi
+    fi
+
+    new_list
+    for d in "$HOME/.cache"/*; do
+        [ -d "$d" ] && add_item "$d" "$(short "$d")"
+    done
+    review_list "~/.cache (pip, uv, modele ML itp.)" "To cache — pobierze się ponownie, gdy będzie potrzebne."
+    return 0
+}
+
+sec_appcaches() {
+    local d n
+    ask_rm "$HOME/Library/Caches/com.spotify.client" "Spotify: bufor odtwarzania"
+    ask_rm "$HOME/Library/Application Support/Spotify/PersistentCache" "Spotify: PersistentCache" \
+        "Pobrane utwory offline trzeba będzie ściągnąć ponownie. Zamknij Spotify przed usunięciem."
+
+    new_list
+    for d in "$HOME/Library/Caches"/*; do
+        [ -d "$d" ] || continue
+        n=$(basename "$d")
+        case "$n" in
+            # przeglądarki — nie ruszamy
+            Google|com.google.Chrome*|BraveSoftware|com.brave.*|Firefox|Mozilla|org.mozilla.*|company.thebrowser.*|Arc) continue ;;
+            # obsłużone w innych sekcjach
+            com.spotify.client|Homebrew|CocoaPods|Yarn|org.swift.swiftpm|JetBrains) continue ;;
+            # cache systemowe Apple (w tym Safari) — macOS zarządza nimi sam
+            com.apple.*|CloudKit|Metadata) continue ;;
+        esac
+        add_item "$d" "Caches/$n" 200
+    done
+    review_list "Inne duże cache aplikacji (~/Library/Caches)" \
+        "Zamknij te aplikacje przed usunięciem ich cache. Przeglądarki i cache Apple są pomijane."
+
+    ask_rm "$HOME/Library/Logs/DiagnosticReports" "Raporty crashy" \
+        "Są tu też crashe Twoich aplikacji z symulatora — zajrzyj, jeśli czegoś szukasz."
+    return 0
+}
+
+sec_electron() {
+    # Aplikacje na Electron/Chromium (Notion, Teams, Claude, VS Code, Todoist, Slack…)
+    # trzymają w Application Support wielogigabajtowe cache. Usuwamy tylko katalogi cache —
+    # konta, dokumenty, IndexedDB i ustawienia zostają.
+    local as="$HOME/Library/Application Support" app n d
+    new_list
+    for app in "$as"/*; do
+        [ -d "$app" ] || continue
+        n=$(basename "$app")
+        case "$n" in
+            # przeglądarki (Google = Chrome + Android Studio, obsłużone w sekcji Android)
+            Google|BraveSoftware|Firefox|Mozilla|Arc|Microsoft\ Edge*|Vivaldi|com.operasoftware.*) continue ;;
+            # komunikatory i dane systemowe — nie ruszamy
+            Signal|WhatsApp|Telegram*|MobileSync|AddressBook|CallHistoryDB|Knowledge|com.apple.*) continue ;;
+        esac
+        # tylko aplikacje oparte na Chromium (mają katalog „Code Cache”)
+        [ -n "$(find "$app" -maxdepth 4 -type d -name 'Code Cache' -print 2>/dev/null | head -1)" ] || continue
+        while IFS= read -r d; do
+            add_item "$d" "${d#"$as"/}"
+        done < <(find "$app" -maxdepth 5 -type d \( -name Cache -o -name 'Code Cache' -o -name GPUCache \
+                    -o -name DawnCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \
+                    -o -name CacheStorage -o -name ScriptCache -o -name CachedData \
+                    -o -name CachedExtensionVSIXs -o -name Crashpad \) -prune 2>/dev/null)
+    done
+    review_list "Cache aplikacji Electron (~/Library/Application Support)" \
+        "Zamknij te aplikacje przed usunięciem. Zostają konta, dokumenty i ustawienia — znika tylko cache."
+    return 0
+}
+
+sec_home_misc() {
+    local d n t mb p
+    # Kosz
+    t=$(size_mb "$HOME/.Trash")
+    if [ "$t" -gt 0 ]; then
+        echo "  ${YELLOW}$(human "$t") — Kosz${NC}"
+        if confirm "Opróżnić Kosz?"; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                print_info "[dry-run] opróżniłbym Kosz (~$(human "$t"))"
+            else
+                find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
+                print_ok "Kosz opróżniony (~$(human "$t"))"
+            fi
+            TOTAL_FREED=$((TOTAL_FREED + t))
+        fi
+    else
+        print_info "Kosz pusty (albo Terminal nie ma Pełnego dostępu do dysku)."
+    fi
+
+    # Ukryte katalogi narzędzi w ~ (.hermes, .feynman, .insightface…): cache, logi, tmp
+    new_list
+    for d in "$HOME"/.[!.]*; do
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        case "$(basename "$d")" in
+            .Trash|.gradle|.android|.konan|.npm|.cache|.local|.claude|.ssh|.gnupg|.docker|.orbstack|.dartServer|.pub-cache) continue ;;
+        esac
+        while IFS= read -r p; do
+            add_item "$p" "$(short "$p")"
+        done < <(find "$d" -maxdepth 3 -type d \( -iname cache -o -iname caches -o -name .cache \
+                    -o -iname logs -o -iname log -o -iname tmp -o -iname temp \) -prune 2>/dev/null)
+    done
+    review_list "Cache, logi i pliki tymczasowe w ukrytych katalogach narzędzi"
+
+    # Duże katalogi narzędzi — tylko podgląd, decyzja należy do Ciebie
+    echo "  ${CYAN}Duże ukryte katalogi w ~ (≥ 500 MB) — tylko podgląd, sprawdź sam:${NC}"
+    for d in "$HOME"/.[!.]*; do
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        case "$(basename "$d")" in
+            .Trash|.gradle|.android|.konan|.npm|.cache|.local|.claude|.dartServer|.pub-cache) continue ;;
+        esac
+        t=$(size_mb "$d")
+        [ "$t" -ge 500 ] || continue
+        printf '    %10s  %s\n' "$(human "$t")" "$(short "$d")"
+        du -sm "$d"/* "$d"/.[!.]* 2>/dev/null | sort -rn | head -3 | while read -r mb p; do
+            printf '    %10s    └ %s\n' "$(human "$mb")" "$(basename "$p")"
+        done
+    done
+    return 0
+}
+
+sec_claude() {
+    local vers="$HOME/.local/share/claude/versions" launcher="$HOME/.local/bin/claude"
+    local active f v rest
+
+    if [ -d "$HOME/.claude/projects" ]; then
+        print_info "Transkrypty Claude Code (~/.claude/projects): $(human "$(size_mb "$HOME/.claude/projects")")"
+        if ! grep -qs '"cleanupPeriodDays"' "$HOME/.claude/settings.json"; then
+            print_info 'Krótsza retencja: dodaj "cleanupPeriodDays": 7 do ~/.claude/settings.json (domyślnie 30 dni).'
+        fi
+    fi
+
+    if [ ! -d "$vers" ]; then print_skip "Wersje Claude Code (brak instalacji natywnej)"; return 0; fi
+    if [ ! -L "$launcher" ]; then
+        print_warn "~/.local/bin/claude to nie symlink instalatora — Claude Code trzyma wtedy wszystkie wersje."
+        print_info "Naprawa: rm ~/.local/bin/claude && claude update"
+        return 0
+    fi
+    active=$(basename "$(readlink "$launcher")")
+    for f in "$vers"/*; do
+        v=$(basename "$f")
+        case "$v" in [0-9]*.[0-9]*) printf '%s\t%s\n' "$v" "$v" ;; esac
+    done | vsort | drop_last 1 > "$WORK/claude"
+
+    new_list
+    while IFS=$'\t' read -r v rest; do
+        [ "$v" = "$active" ] && continue
+        if lsof -t "$vers/$v" >/dev/null 2>&1; then
+            print_info "Claude Code $v — używa go działająca sesja, zostaje"
+            continue
+        fi
+        add_item "$vers/$v" "Claude Code $v" 1
+    done < "$WORK/claude"
+    review_list "Stare wersje Claude Code (aktywna: $active, najnowsza też zostaje)"
+    return 0
+}
+
+sec_system() {
+    local dates count d size img=/private/var/vm/sleepimage
+
+    dates=$(tmutil listlocalsnapshotdates / 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}$' || true)
+    if [ -n "$dates" ]; then
+        count=$(printf '%s\n' "$dates" | wc -l | tr -d ' ')
+        echo "  ${YELLOW}Lokalne snapshoty Time Machine: $count${NC}"
+        printf '%s\n' "$dates" | sed 's/^/    /'
+        print_warn "Snapshot trzyma miejsce po plikach usuniętych po jego utworzeniu — dopiero jego usunięcie je oddaje."
+        if confirm "Usunąć wszystkie lokalne snapshoty? (kopie na dysku Time Machine zostają)"; then
+            while IFS= read -r d; do
+                run_ok "Usunięto snapshot $d" sudo tmutil deletelocalsnapshots "$d"
+            done <<< "$dates"
+        fi
+    else
+        print_info "Brak lokalnych snapshotów Time Machine."
+    fi
+
+    if [ -f "$img" ]; then
+        size=$(du -sm "$img" 2>/dev/null | awk 'END { print $1 + 0 }')
+        size=${size:-0}
+        if pmset -g batt 2>/dev/null | grep -q InternalBattery; then
+            print_info "sleepimage $(human "$size") — to laptop, zostawiam (bez hibernacji rozładowana bateria = utrata otwartej pracy)."
+        elif confirm "sleepimage $(human "$size"): wyłączyć hibernację i usunąć plik?"; then
+            if run_ok "Hibernacja wyłączona" sudo pmset -a hibernatemode 0 &&
+               run_ok "sleepimage usunięty" sudo rm -f "$img"; then
+                TOTAL_FREED=$((TOTAL_FREED + size))
+            fi
+        fi
+    fi
+    return 0
+}
+
+sec_report() {
+    local mb p f
+    echo "  ${CYAN}Największe katalogi w ~ (do 3 poziomów):${NC}"
+    du -xm -d 3 "$HOME" 2>/dev/null | sort -rn | head -25 | while read -r mb p; do
+        printf '    %10s  %s\n' "$(human "$mb")" "$(short "$p")"
+    done
+    echo ""
+    echo "  ${CYAN}Największe aplikacje:${NC}"
+    du -sm /Applications/* 2>/dev/null | sort -rn | head -5 | while read -r mb p; do
+        printf '    %10s  %s\n' "$(human "$mb")" "$p"
+    done
+    echo ""
+    echo "  ${CYAN}Poza katalogiem domowym (bez sudo):${NC}"
+    for p in /opt/homebrew /usr/local /private/var/vm \
+             "$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null)" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" \
+             "/private/tmp/claude-$(id -u)"; do
+        [ -n "$p" ] && [ -e "$p" ] || continue
+        mb=$(du -sxm "$p" 2>/dev/null | awk 'END { print $1 + 0 }')
+        printf '    %10s  %s\n' "$(human "${mb:-0}")" "$p"
+    done
+    echo ""
+    echo "  ${CYAN}Pliki większe niż 1 GB w ~:${NC}"
+    find "$HOME" -xdev -type f -size +1G 2>/dev/null | while IFS= read -r f; do
+        printf '    %10s  %s\n' "$(human "$(size_mb "$f")")" "$(short "$f")"
+    done
+    return 0
+}
+
+# ════════════════════════════════════════
+#  START
+# ════════════════════════════════════════
+echo ""
+echo "${BOLD}🧹 Miotła${NC}  $(date '+%Y-%m-%d %H:%M')"
+if [ "$DRY_RUN" -eq 1 ]; then echo "${YELLOW}${BOLD}  TRYB DRY-RUN — nic nie zostanie usunięte${NC}"; fi
+if [ -d "$HOME/Library/Safari" ] && ! ls "$HOME/Library/Safari" >/dev/null 2>&1; then
+    print_warn "Terminal nie ma „Pełnego dostępu do dysku” — część katalogów zostanie pominięta."
+    print_info "Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku."
+fi
+FREE_BEFORE=$(disk_free_mb)
+echo "Wolne miejsce PRZED: ${RED}$(human "$FREE_BEFORE")${NC}"
+
+section "1. DOCKER"                                           && sec_docker
+section "2. GRADLE — cache i dystrybucje"                     && sec_gradle
+section "3. PROJEKTY — katalogi build/ i .gradle/"            && sec_projects
+section "4. ANDROID — emulatory, SDK, Android Studio, K/N"    && sec_android
+section "5. XCODE / iOS — buildy, symbole, symulatory"        && sec_xcode
+section "6. NARZĘDZIA — npm, Yarn, Homebrew, ~/.cache"        && sec_tools
+section "7. CACHE APLIKACJI — Spotify i inne"                 && sec_appcaches
+section "8. APLIKACJE ELECTRON — Notion, Teams, Claude, VS Code" && sec_electron
+section "9. KOSZ I KATALOGI NARZĘDZI W ~"                     && sec_home_misc
+section "10. CLAUDE CODE — stare wersje, transkrypty"         && sec_claude
+section "11. SYSTEM DATA — snapshoty Time Machine, sleepimage" && sec_system
+section "12. RAPORT — co jeszcze zajmuje miejsce (1–3 min)"   && sec_report
+
+# ─── PODSUMOWANIE ────────────────────────────────────────────
+FREE_AFTER=$(disk_free_mb)
+GAINED=$((FREE_AFTER - FREE_BEFORE))
+print_header "PODSUMOWANIE"
+echo "  Wolne przed:  $(human "$FREE_BEFORE")"
+echo "  Wolne po:     $(human "$FREE_AFTER")"
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "  ${BOLD}Do odzyskania (dry-run): ~$(human "$TOTAL_FREED")${NC}"
+else
+    echo "  Usunięto:     ~$(human "$TOTAL_FREED")"
+    echo "  ${BOLD}${GREEN}Odzyskano:    ~$(human "$GAINED")${NC}"
+    if [ "$GAINED" -lt $((TOTAL_FREED / 2)) ]; then
+        print_info "Odzyskano mniej, niż usunięto? Miejsce trzymają lokalne snapshoty Time Machine,"
+        print_info "a Docker i APFS oddają je z opóźnieniem."
+    fi
+fi
+echo ""
+echo "${YELLOW}💡 Głębsza analiza: brew install ncdu && ncdu ~   (albo DaisyDisk / GrandPerspective)${NC}"
+echo ""
