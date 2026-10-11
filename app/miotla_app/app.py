@@ -215,14 +215,14 @@ class MiotlaApp(rumps.App):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def run_selected_clean(self, tokens) -> None:
-        """Wywoływane przez okno „Pełne sprzątanie" po kliknięciu Sprzątaj."""
-        if not tokens or self._busy:
+    def run_selected_clean(self, paths) -> None:
+        """Wywoływane przez okno „Pełne sprzątanie" — usuwa zaznaczone ścieżki."""
+        if not paths or self._busy:
             return
         self._set_busy(True)
 
         def work() -> None:
-            _rc, out, summ = engine.clean(list(tokens))
+            _rc, out, summ = engine.clean_items(list(paths))
             self._set_busy(False)
             self._notify("Miotła", f"Odzyskano {engine.human(summ.get('freed_mb', 0))}")
             self._show_window(out, "Miotła — pełne sprzątanie")

@@ -136,6 +136,30 @@ def clean(tokens: list, dry_run: bool = False) -> tuple[int, str, dict]:
         return 1, f"Błąd uruchomienia miotła:\n{exc}", {}
 
 
+def clean_items(paths: list, dry_run: bool = False) -> tuple[int, str, dict]:
+    """Usuń dokładnie wskazane ścieżki (bezpiecznie, tylko w $HOME)."""
+    if not paths:
+        return 0, "", {}
+    import tempfile
+    fd, fn = tempfile.mkstemp(suffix=".txt", prefix="miotla-sel-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(paths) + "\n")
+        args = [script_path(), "--clean-items=" + fn, "--json"]
+        if dry_run:
+            args.append("--dry-run")
+        p = subprocess.run(args, capture_output=True, text=True)
+        out = (p.stdout or "") + (p.stderr or "")
+        return p.returncode, out, _parse_summary(out)
+    except Exception as exc:  # noqa: BLE001
+        return 1, f"Błąd uruchomienia miotła:\n{exc}", {}
+    finally:
+        try:
+            os.remove(fn)
+        except OSError:
+            pass
+
+
 def open_interactive_in_terminal() -> None:
     """Pełne, interaktywne sprzątanie wymaga klawiatury → otwórz w Terminalu."""
     subprocess.run(["open", "-a", "Terminal", script_path()], check=False)
