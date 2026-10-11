@@ -1,124 +1,169 @@
-# 🧹 Miotła
+<div align="center">
 
-Narzędzie do bezpiecznego sprzątania Maca dewelopera: cache Dockera, Gradle/Androida/KMP,
-Xcode'a i symulatorów, aplikacji Electron (Notion, Teams, Claude, VS Code…), npm/Homebrew,
-Kosza i danych systemowych. Pokazuje wolne miejsce w pasku menu i pozwala posprzątać
-jednym kliknięciem.
+<img src="assets/app_icon.png" width="112" alt="Miotła icon">
 
-Dwa tryby:
+# Miotła
 
-- **Interaktywny** (`miotla`) — przechodzi po kategoriach i pyta o każdą decyzję. Pełna kontrola,
-  także rzeczy, których tryb automatyczny świadomie nie rusza (emulatory, Archives, Kosz,
-  snapshoty Time Machine itd.).
-- **Automatyczny** (`miotla --auto`) — zero pytań, sprząta **tylko w 100% odtwarzalne cache**
-  (biała lista poniżej). Napędza plugin SwiftBar w pasku menu.
+**Safe cleanup for a developer's Mac, living in the macOS menu bar.**
+See how much disk space is left and reclaim it with one click — removing only
+caches your tools regenerate on their own. Everything in a window, not a terminal.
 
-## Bezpieczeństwo
+[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![bash](https://img.shields.io/badge/engine-bash%203.2-4EAA25?logo=gnubash&logoColor=white)](bin/miotla)
+[![Homebrew](https://img.shields.io/badge/install-brew-FBB040?logo=homebrew&logoColor=white)](#-installation)
+[![License: MIT](https://img.shields.io/badge/License-MIT-3da639.svg)](LICENSE)
 
-Miotła kasuje **wyłącznie wewnątrz katalogu domowego** (jedyne wyjątki w trybie interaktywnym,
-zawsze po pytaniu: snapshoty Time Machine i `sleepimage` przez `sudo`).
+**[🌐 Project site](https://rafalgawlik.github.io/miotla)** · **[💻 GitHub](https://github.com/rafalgawlik/miotla)**
 
-**Nigdy nie rusza:**
+</div>
 
-- przeglądarek (Brave, Chrome, Firefox, Safari, Arc, Edge…),
-- danych Signala i WhatsAppa,
-- `~/.gradle/gradle.properties`,
-- ustawień i logowania Claude Code (`~/.claude`).
+---
 
-Na prawdziwym systemie uruchamiaj najpierw **podgląd** (`--dry-run`) — nic wtedy nie znika.
+The **🧹** icon sits in the menu bar next to the clock and shows free space.
+Clicking it opens the menu:
 
-## Tryb `--auto` — co sprząta (biała lista)
-
-Tylko cache, które narzędzia odtworzą same przy następnym użyciu:
-
-- **npm**: `~/.npm/_cacache`, `~/.npm/_npx`; **Yarn**: `~/Library/Caches/Yarn`
-- **Homebrew**: `brew cleanup --prune=all`
-- **Gradle** — tylko gdy **nie działa** żaden daemon Gradle/Kotlin (jeśli działa — pomija,
-  nie zabija): build-cache, stare generacje cache (`transforms-3` itp.), cache i dystrybucje
-  starszych wersji (zostają 2 najnowsze), logi daemonów
-- **Xcode**: DerivedData, cache Xcode i Swift Package Managera, `CoreSimulator/Caches`,
-  `simctl delete unavailable`
-- **Electron**: katalogi cache aplikacji opartych na Chromium, **z pominięciem uruchomionych**
-  (konta, dokumenty i ustawienia zostają — znika tylko cache)
-- **Docker** (gdy działa): `docker builder prune` i `docker image prune` — tylko wiszące obrazy
-  i cache buildów (bez `-a`, bez wolumenów)
-
-**Czego `--auto` NIGDY nie rusza:** emulatorów i obrazów systemu Android, NDK, runtime'ów
-symulatorów, Xcode Archives, całego `~/.gradle/caches`, `~/.konan`, `~/.cache`, wersji Claude Code,
-folderów starych IDE, katalogów `build/` w projektach, Kosza, snapshotów Time Machine,
-`sleepimage` — i niczego przez `sudo`.
-
-### Użycie z wiersza poleceń
-
-```sh
-bin/miotla                 # tryb interaktywny
-bin/miotla --dry-run       # interaktywny podgląd (nic nie usuwa)
-bin/miotla --auto          # automatyczne sprzątanie białej listy
-bin/miotla --auto --dry-run  # podgląd tego, co zrobiłby --auto
-bin/miotla --auto --json   # wynik jako JSON (do skryptów/aplikacji)
+```text
+🧹 100 GB
+  Free: 100.5 GB  ·  Used: 101 GB
+  ⚡  Quick cleanup
+  👀  Preview (what would be removed)
+  🗂️  Full cleanup…
+  Last cleanup: today, recovered 4.2 GB
+  Open log
+  ℹ︎  About Miotła
 ```
 
-Każde uruchomienie `--auto`:
+The number turns **orange below 40 GB** and **red below 20 GB**. One click runs a
+safe cleanup; the broom sweeps in the bar while it works, and the result opens in
+a window.
 
-- blokuje się przed równoległym startem (lock w `~/Library/Caches/miotla/`),
-- zapisuje log w `~/Library/Logs/miotla/` (zostaje ostatnie 20),
-- kończy się linią do parsowania, np.:
-  `RESULT status=ok freed_mb=4312 free_before_mb=98000 free_after_mb=102312 dry_run=0 skipped=gradle_daemon`
-- zapisuje ostatni wynik (data, odzyskane MB) do pliku stanu `~/Library/Caches/miotla/state`,
-- pokazuje powiadomienie macOS „Miotła: Odzyskano X” (poza `--dry-run`).
+## ✨ Features
 
-## Plugin SwiftBar (pasek menu)
+- 📊 **Free space in the menu bar** — always visible, color-coded by how much is left.
+- ⚡ **Quick cleanup** — one click clears fully regenerable caches (an allow-list). No questions, runs in the background too.
+- 🗂️ **Full cleanup in a window** — per-item checkboxes for specific emulators, Xcode Archives, old versions, caches… with a live "Selected: X" total. Pick exactly what to remove.
+- 🔑 **System items too** — Time Machine snapshots and `sleepimage`, right from the window, with a native admin password prompt.
+- 👀 **Preview first, always** — see what *would* be removed without deleting a thing.
+- 🧹 **Animated broom** — the icon sweeps while a cleanup runs.
+- 🛡️ **Safe by design** — deletes only inside your home folder; the `bin/miotla` engine refuses anything outside `$HOME`.
+- 🖥️ **Native menu bar app** (`rumps`/pyobjc) on top of a battery-tested `bash` engine.
 
-W pasku: ikona miotły + wolne miejsce na `/System/Volumes/Data`
-(czerwone < 20 GB, pomarańczowe < 40 GB; podczas pracy — „sprzątanie…”).
+## 🚀 Installation
 
-Menu: wolne/zajęte miejsce, **Szybkie sprzątanie** (`--auto` w tle),
-**Podgląd** (`--auto --dry-run` w Terminalu), **Pełne sprzątanie w Terminalu** (tryb interaktywny),
-„Ostatnie sprzątanie: …”, „Otwórz log”.
+### Homebrew (recommended)
 
-Odświeża się co 10 minut i jest tanie — czyta tylko `df` i plik stanu (żadnego `du`).
-
-### Instalacja
-
-1. Zainstaluj SwiftBar: <https://swiftbar.app> lub `brew install --cask swiftbar`.
-2. Uruchom SwiftBar i wskaż folder na wtyczki (SwiftBar → Preferences).
-3. W repo:
-
-   ```sh
-   ./install.sh
-   ```
-
-   Skrypt sprawdzi SwiftBar, podlinkowuje plugin do jego folderu wtyczek i — jeśli repo leży
-   poza `~/Projects/miotla` — zapisze ścieżkę skryptu do `~/.config/miotla/config`.
-   **Niczego nie instaluje bez pytania.**
-4. Nadaj SwiftBarowi **Pełny dostęp do dysku** (żeby widział m.in. Kosz i cache aplikacji):
-   *Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku* → dodaj **SwiftBar**.
-
-Odinstalowanie: `./uninstall.sh`.
-
-### Konfiguracja
-
-Progi kolorów i ścieżka skryptu są na górze `swiftbar/miotla.10m.sh`. Można je nadpisać bez
-edycji pluginu, tworząc `~/.config/miotla/config`:
-
-```sh
-SCRIPT="$HOME/ścieżka/do/bin/miotla"
-RED_GB=20
-ORANGE_GB=40
+```bash
+brew install rafalgawlik/tap/miotla
+brew services start miotla
 ```
 
-## Wymagania
+### As an app — launchable from the Dock, Launchpad & Spotlight
 
-- macOS (systemowy `bash` 3.2 wystarcza)
-- SwiftBar — tylko dla pluginu w pasku menu
-- narzędzia opcjonalne: `brew`, `docker`, `xcrun` — używane, jeśli są obecne
+```bash
+git clone https://github.com/rafalgawlik/miotla
+cd miotla/app
+./install-app.sh        # builds Miotła.app (py2app), adds a Login Item, launches it
+```
 
-## Testy
+Grant the app **Full Disk Access** (System Settings → Privacy & Security) so it can
+see the Trash and app caches.
 
-```sh
+<details>
+<summary><b>Alternatively: run from source / use the CLI</b></summary>
+
+```bash
+cd miotla/app && ./run.sh      # menu bar app from source (creates .venv)
+
+# or just the engine from the command line:
+bin/miotla --auto --dry-run    # preview a quick cleanup (removes nothing)
+bin/miotla                     # full interactive cleanup in the terminal (Polish)
+```
+</details>
+
+## 🧽 What it cleans
+
+Only caches and build output your tools recreate on demand:
+
+- 📦 **npm / Yarn** cache, **Homebrew** (`brew cleanup`)
+- 🐘 **Gradle** — build-cache, old generations, old version caches & distributions (or the whole `~/.gradle/caches` on request)
+- 🍎 **Xcode** — DerivedData, SPM/CocoaPods caches, `CoreSimulator/Caches`, DeviceSupport, old Archives
+- 📱 **Android** — unused emulators, system images, NDK
+- ⚛️ **Electron apps** — caches of Notion, Slack, VS Code… (skips running apps)
+- 🐳 **Docker** — dangling images + build cache (never volumes)
+- 🗑️ **Trash**, `~/.cache`, old IDE / Claude Code / Kotlin-Native versions
+- 🔑 **System** (with a password) — Time Machine local snapshots, `sleepimage`
+
+## 🔒 What Miotła never touches
+
+- 🌐 **Browsers** — Brave, Chrome, Firefox, Safari, Arc, Edge (profiles & data)
+- 💬 **Messengers** — Signal, WhatsApp and their databases
+- ⚙️ **Program configuration** — settings, sign-ins and credentials of your tools and apps
+- 📁 **Your work** — documents, source code and project files
+
+Deletion happens **only inside `$HOME`** (the sole exceptions — Time Machine
+snapshots and `sleepimage` — are always behind an explicit password prompt).
+
+## 🗂️ Project structure
+
+```
+bin/miotla                 — the cleanup engine (bash 3.2): interactive +
+                             --auto / --scan / --clean / --clean-items
+swiftbar/miotla.10m.sh     — SwiftBar plugin (a lightweight alternative to the app)
+app/                       — native menu bar app (rumps/pyobjc)
+  miotla_app/              — the app package (engine bridge, windows, icon)
+  install-app.sh           — build Miotła.app (py2app) + Login Item autostart
+  setup_app.py             — py2app config
+  packaging/homebrew/      — formula + release helper
+assets/                    — icons + generator (make_icon.py, needs Pillow)
+tests/                     — tests on a fake $HOME with stubbed tools
+.github/workflows/ci.yml   — shellcheck + tests on macos-latest (real bash 3.2)
+docs/index.html            — the project site (GitHub Pages)
+```
+
+## 🧪 Tests
+
+```bash
 tests/run.sh
 ```
 
-Testy działają na atrapie katalogu domowego i atrapach narzędzi (xcrun/docker/brew/pgrep…),
-więc **nie dotykają prawdziwego `$HOME`**. CI (GitHub Actions) odpala `shellcheck` i testy
-na `macos-latest`.
+Tests run on a fake home directory with stubbed tools (xcrun/docker/brew/pgrep…),
+so they **never touch your real `$HOME`**. CI runs shellcheck + the suite on
+`macos-latest`.
+
+## 📦 Publishing via Homebrew (for the maintainer)
+
+<details>
+<summary><b>Expand the steps to cut a new release</b></summary>
+
+```bash
+# 1. tag + release (the tag drives the formula URL)
+git tag v0.1.0 && git push origin v0.1.0
+gh release create v0.1.0 --generate-notes
+
+# 2. write the tarball sha256 into the formula
+./app/packaging/homebrew/release-sha.sh 0.1.0
+
+# 3. copy the formula into the tap repo `rafalgawlik/homebrew-tap`
+cp app/packaging/homebrew/miotla.rb <tap>/Formula/miotla.rb
+#    then commit & push the tap
+
+# 4. anyone can now install:
+brew install rafalgawlik/tap/miotla
+```
+</details>
+
+## 🛣️ Roadmap
+
+- [ ] Standalone `.app` (non-alias py2app) + a Homebrew **cask** with the icon
+- [ ] Simulator runtimes & project `build/` dirs in the full-cleanup window
+- [ ] Settings (thresholds, default categories)
+- [ ] English CLI mode (the terminal engine is currently Polish)
+
+## 📄 License & author
+
+[MIT](LICENSE) © 2026 **Rafał Gawlik** — [rafalgawlik.com](https://rafalgawlik.com) · [@rafalgawlik](https://github.com/rafalgawlik)
+
+<div align="center">
+<sub>Built with bash · Python · <code>rumps</code> · pyobjc</sub>
+</div>

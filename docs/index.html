@@ -67,9 +67,16 @@
   /* makieta paska menu */
   .mock{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
         box-shadow:var(--shadow); overflow:hidden}
-  .mbar{display:flex; align-items:center; justify-content:flex-end; gap:16px; padding:8px 14px;
-        background:color-mix(in srgb,var(--ink) 92%, #000); color:#eafff6; font-size:13px}
-  .mbar .free{color:#34d399; font-weight:700}
+  /* realistic macOS dark menu bar (fixed dark, not theme-dependent) */
+  .mbar{display:flex; align-items:center; justify-content:flex-end; gap:14px; padding:9px 16px;
+        background:#15171a; color:#e9eef0; font-size:12.5px;
+        border-bottom:1px solid rgba(255,255,255,.08)}
+  .mbar .sys{opacity:.5; font-size:12px; letter-spacing:.02em}
+  .mbar .item{display:inline-flex; align-items:center; gap:7px; margin-right:auto;
+        background:rgba(255,255,255,.14); padding:5px 12px; border-radius:9px;
+        font-weight:800; font-size:14px}
+  .mbar .item .bi{font-size:16px}
+  .mbar .item .free{color:#34d399}
   .menu{padding:10px}
   .menu .row{display:flex; justify-content:space-between; padding:8px 10px; border-radius:10px; font-size:14px}
   .menu .row:hover{background:color-mix(in srgb,var(--accent) 12%, var(--card))}
@@ -129,7 +136,13 @@
     </div>
   </div>
   <div class="mock" aria-hidden="true">
-    <div class="mbar"><span>🧹 <span class="free">100 GB</span></span></div>
+    <div class="mbar">
+      <span class="item"><span class="bi">🧹</span> <span class="free">100 GB</span></span>
+      <span class="sys">📶</span>
+      <span class="sys">🔋</span>
+      <span class="sys">🔍</span>
+      <span class="sys">Sun 13:49</span>
+    </div>
     <div class="menu">
       <div class="row"><span>Free: 100.5 GB</span><span class="muted">Used: 101 GB</span></div>
       <div class="sep"></div>
