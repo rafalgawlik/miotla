@@ -46,12 +46,19 @@ DRY_RUN=0
 AUTO=0
 JSON=0
 ANIMATE=0
+SCAN=0
+CLEAN=0
+SCAN_CATS=""
+CLEAN_TOKENS=""
 for arg in "$@"; do
     case "$arg" in
         -a|--auto) AUTO=1 ;;
         -n|--dry-run) DRY_RUN=1 ;;
         -j|--json) JSON=1 ;;
         -A|--animate) ANIMATE=1 ;;   # (z --auto) animuj ikonę miotełki w SwiftBar
+        --scan) SCAN=1 ;;            # wypisz kategorie z rozmiarami (JSON), nic nie usuwaj
+        --scan=*) SCAN=1; SCAN_CATS="${arg#*=}" ;;
+        --clean=*) CLEAN=1; CLEAN_TOKENS="${arg#*=}" ;;   # usuń wybrane kategorie (lista po przecinku)
         -h|--help) usage; exit 0 ;;
         *) echo "Nieznana opcja: $arg"; usage; exit 1 ;;
     esac
@@ -1036,8 +1043,176 @@ run_auto() {
 }
 
 # ════════════════════════════════════════
+#  TRYB --scan / --clean (dla okna „Pełne sprzątanie" w apce)
+# ════════════════════════════════════════
+# Kategorie bezpieczne do usuwania wsadowego (tylko ścieżki w $HOME, bez sudo,
+# bez wyborów per sztuka). Groźne rzeczy (konkretne emulatory, Archives,
+# snapshoty, sudo) zostają w trybie interaktywnym.
+CLEAN_CATS="npm_yarn gradle_all xcode_derived xcode_caches electron dart cache_dir trash"
+
+cat_label() {
+    case "$1" in
+        npm_yarn)      echo "npm + Yarn (cache)" ;;
+        gradle_all)    echo "Gradle — cały ~/.gradle/caches" ;;
+        xcode_derived) echo "Xcode DerivedData" ;;
+        xcode_caches)  echo "Cache Xcode / SPM / CocoaPods / symulatorów" ;;
+        electron)      echo "Cache aplikacji Electron (pomija uruchomione)" ;;
+        dart)          echo "Dart/Flutter (.dartServer, .pub-cache)" ;;
+        cache_dir)     echo "~/.cache" ;;
+        trash)         echo "Kosz" ;;
+        *)             echo "$1" ;;
+    esac
+}
+cat_warn() {
+    case "$1" in
+        gradle_all) echo "Wszystkie zależności pobiorą się od nowa." ;;
+        trash)      echo "Bezpowrotnie usuwa zawartość Kosza." ;;
+        *)          echo "" ;;
+    esac
+}
+
+scan_emit() {   # scan_emit ścieżka opis — wypisz "mb<TAB>path<TAB>desc", gdy ≥1 MB
+    local mb
+    { [ -e "$1" ] || [ -L "$1" ]; } || return 0
+    mb=$(size_mb "$1"); [ "$mb" -ge 1 ] || return 0
+    printf '%s\t%s\t%s\n' "$mb" "$1" "$2"
+}
+
+collect_electron() {   # emituj katalogi cache apek Electron (pomija uruchomione)
+    local as="$HOME/Library/Application Support" app n d
+    for app in "$as"/*; do
+        [ -d "$app" ] || continue
+        n=$(basename "$app")
+        case "$n" in
+            Google|BraveSoftware|Firefox|Mozilla|Arc|Microsoft\ Edge*|Vivaldi|com.operasoftware.*) continue ;;
+            Signal|WhatsApp|Telegram*|MobileSync|AddressBook|CallHistoryDB|Knowledge|com.apple.*) continue ;;
+        esac
+        [ -n "$(find "$app" -maxdepth 4 -type d -name 'Code Cache' -print 2>/dev/null | head -1)" ] || continue
+        pgrep -i "$n" >/dev/null 2>&1 && continue
+        while IFS= read -r d; do
+            scan_emit "$d" "${d#"$as"/}"
+        done < <(find "$app" -maxdepth 5 -type d \( -name Cache -o -name 'Code Cache' -o -name GPUCache \
+                    -o -name DawnCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \
+                    -o -name CacheStorage -o -name ScriptCache -o -name CachedData \
+                    -o -name CachedExtensionVSIXs -o -name Crashpad \) -prune 2>/dev/null)
+    done
+}
+
+scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
+    local d
+    case "$1" in
+        npm_yarn)
+            scan_emit "$HOME/.npm/_cacache" "npm _cacache"
+            scan_emit "$HOME/.npm/_npx" "npm _npx"
+            scan_emit "$HOME/Library/Caches/Yarn" "Yarn" ;;
+        gradle_all)
+            scan_emit "$GRADLE_HOME/caches" "~/.gradle/caches" ;;
+        xcode_derived)
+            for d in "$HOME/Library/Developer/Xcode/DerivedData"/*; do
+                [ -d "$d" ] && scan_emit "$d" "DerivedData/$(basename "$d")"
+            done ;;
+        xcode_caches)
+            scan_emit "$HOME/Library/Caches/com.apple.dt.Xcode" "Cache Xcode"
+            scan_emit "$HOME/Library/Caches/org.swift.swiftpm" "Cache Swift Package Manager"
+            scan_emit "$HOME/Library/Caches/CocoaPods" "Cache CocoaPods"
+            scan_emit "$HOME/Library/Developer/CoreSimulator/Caches" "CoreSimulator/Caches" ;;
+        electron)
+            collect_electron ;;
+        dart)
+            scan_emit "$HOME/.dartServer" ".dartServer"
+            scan_emit "$HOME/.pub-cache" ".pub-cache" ;;
+        cache_dir)
+            for d in "$HOME/.cache"/*; do
+                [ -d "$d" ] && scan_emit "$d" "~/.cache/$(basename "$d")"
+            done ;;
+        trash)
+            scan_emit "$HOME/.Trash" "Kosz" ;;
+    esac
+}
+
+json_esc() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
+
+emit_scan_json() {   # emit_scan_json "token1 token2 ..." → JSON kategorii z pozycjami
+    local token first_cat=1 itotal mb path desc first_item
+    printf '['
+    for token in $1; do
+        scan_category "$token" > "$WORK/scanitems"
+        itotal=$(awk -F'\t' '{ s += $1 } END { print s + 0 }' "$WORK/scanitems")
+        [ "$first_cat" -eq 1 ] || printf ','
+        first_cat=0
+        printf '{"token":"%s","label":"%s","warn":"%s","total_mb":%s,"items":[' \
+            "$token" "$(json_esc "$(cat_label "$token")")" "$(json_esc "$(cat_warn "$token")")" "$itotal"
+        first_item=1
+        while IFS=$'\t' read -r mb path desc; do
+            [ "$first_item" -eq 1 ] || printf ','
+            first_item=0
+            printf '{"mb":%s,"path":"%s","desc":"%s"}' "$mb" "$(json_esc "$path")" "$(json_esc "$desc")"
+        done < "$WORK/scanitems"
+        printf ']}'
+    done
+    printf ']\n'
+}
+
+run_clean() {   # run_clean "token1 token2 ..." — usuń wybrane kategorie (infra jak --auto)
+    local token mb path desc t free_before free_after freed log
+    PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; export PATH
+    mkdir -p "$MIOTLA_LOGS" 2>/dev/null || true
+    log="$MIOTLA_LOGS/miotla-$(date '+%Y%m%d-%H%M%S').log"
+    exec > >(tee -a "$log") 2>&1
+
+    if ! acquire_lock; then
+        echo "Miotła już działa (lock) — pomijam."
+        emit_result locked 0 0 0
+        return 0
+    fi
+    trap 'release_lock; rm -rf "$WORK"' EXIT
+
+    free_before=$(disk_free_mb)
+    echo "🧹 Miotła --clean$([ "$DRY_RUN" -eq 1 ] && echo ' --dry-run')  $(date '+%Y-%m-%d %H:%M')"
+    echo "Wolne przed: $(human "$free_before")"
+
+    for token in $1; do
+        echo "── $(cat_label "$token") ──"
+        if [ "$token" = "trash" ]; then
+            t=$(size_mb "$HOME/.Trash")
+            if [ "$t" -lt 1 ]; then print_skip "Kosz (pusty)"; continue; fi
+            if [ "$DRY_RUN" -eq 1 ]; then
+                print_info "[dry-run] opróżniłbym Kosz (~$(human "$t"))"
+            else
+                find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
+                print_ok "Kosz opróżniony (~$(human "$t"))"
+            fi
+            TOTAL_FREED=$((TOTAL_FREED + t))
+            continue
+        fi
+        scan_category "$token" > "$WORK/scanitems"
+        if [ ! -s "$WORK/scanitems" ]; then print_info "nic do usunięcia"; continue; fi
+        while IFS=$'\t' read -r mb path desc; do
+            safe_rm "$path" "$desc" "$mb"
+        done < "$WORK/scanitems"
+    done
+
+    free_after=$(disk_free_mb)
+    freed=$TOTAL_FREED
+    echo "Odzyskane (szacunek): $(human "$freed")  |  wolne po: $(human "$free_after")"
+    if [ "$DRY_RUN" -eq 0 ]; then
+        write_state ok "$freed" "$free_before" "$free_after"
+        if [ "$freed" -gt 0 ]; then notify "Odzyskano $(human "$freed")"; else notify "Nic do sprzątania"; fi
+    fi
+    rotate_logs
+    emit_result ok "$freed" "$free_before" "$free_after"
+    return 0
+}
+
+# ════════════════════════════════════════
 #  START
 # ════════════════════════════════════════
+if [ "$SCAN" -eq 1 ]; then
+    cats="${SCAN_CATS:-$CLEAN_CATS}"
+    emit_scan_json "${cats//,/ }"
+    exit 0
+fi
+if [ "$CLEAN" -eq 1 ]; then run_clean "${CLEAN_TOKENS//,/ }"; exit 0; fi
 if [ "$AUTO" -eq 1 ]; then run_auto; exit 0; fi
 
 echo ""
