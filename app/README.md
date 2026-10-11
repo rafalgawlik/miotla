@@ -19,8 +19,15 @@ cd app
 ./run.sh          # pierwszy raz: tworzy .venv i instaluje rumps
 ```
 
-Autostart po zalogowaniu: skopiuj `packaging/com.miotla.app.plist` do
-`~/Library/LaunchAgents/` (zamień ścieżkę w pliku) i `launchctl load` go.
+Autostart po zalogowaniu:
+
+```sh
+cd app
+./install-autostart.sh      # tworzy LaunchAgent i uruchamia apkę teraz
+./uninstall-autostart.sh    # wyłącza autostart i zatrzymuje apkę
+```
+
+(Szablon pliku: `packaging/com.miotla.app.plist`.)
 
 ## Status
 
