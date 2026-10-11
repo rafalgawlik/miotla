@@ -80,9 +80,37 @@ def draw_broom(size_pt, angle=0.0):
     return img.resize((size_pt * 2, size_pt * 2), Image.LANCZOS)
 
 
-def save(img, name):
+def draw_app_icon(size=512):
+    """Ikona Docka / Cmd-Tab: biała miotła na zaokrąglonym zielonym kafelku."""
+    S = size
+    top, bot = (52, 211, 153), (10, 150, 110)   # emerald → green (jak landing)
+    grad = Image.new("RGBA", (S, S))
+    gd = ImageDraw.Draw(grad)
+    for y in range(S):
+        t = y / (S - 1)
+        gd.line([(0, y), (S, y)], fill=(
+            int(top[0] + (bot[0] - top[0]) * t),
+            int(top[1] + (bot[1] - top[1]) * t),
+            int(top[2] + (bot[2] - top[2]) * t), 255))
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=int(S * 0.225), fill=255)
+    tile = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    tile.paste(grad, (0, 0), mask)
+
+    # sylwetka miotły (czerń+alfa) → przemalowana na biało, wyśrodkowana
+    broom = draw_broom(128)                      # 256×256, czerń na przezroczystym
+    alpha = broom.split()[3]
+    white = Image.merge("RGBA", (Image.new("L", broom.size, 255),) * 3 + (alpha,))
+    target = int(S * 0.80)
+    white = white.resize((target, target), Image.LANCZOS)
+    off = (S - target) // 2
+    tile.alpha_composite(white, (off, off))
+    return tile
+
+
+def save(img, name, dpi=(144, 144)):
     path = os.path.join(HERE, name)
-    img.save(path, dpi=(144, 144))     # 144 dpi → punkty = piksele/2 = rozmiar paska
+    img.save(path, dpi=dpi)            # 144 dpi → punkty = piksele/2 = rozmiar paska
     return path
 
 
@@ -96,6 +124,10 @@ def main():
 
     static = save(draw_broom(size_pt), "broom-template.png")
     print("ICON_STATIC=" + b64(static))
+
+    # kolorowa ikona Docka / Cmd-Tab (72 dpi — pełny rozmiar)
+    save(draw_app_icon(512), "app_icon.png", dpi=(72, 72))
+    print("APP_ICON=app_icon.png")
 
     for i in range(FRAMES):
         ang = SWING * math.sin(2 * math.pi * i / FRAMES)

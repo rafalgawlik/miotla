@@ -10,6 +10,7 @@ from . import __version__, engine
 
 _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 ICON_PATH = os.path.join(_ASSETS, "broom-template.png")
+APP_ICON_PATH = os.path.join(_ASSETS, "app_icon.png")   # kolorowa ikona Docka/Cmd-Tab
 SWEEP_FRAMES = [os.path.join(_ASSETS, f"broom_sweep_{i:02d}.png") for i in range(8)]
 SWEEP_FRAMES = [p for p in SWEEP_FRAMES if os.path.exists(p)]
 FALLBACK_TITLE = "🧹"
@@ -46,6 +47,7 @@ class MiotlaApp(rumps.App):
         global _APP
         _APP = self
         _set_app_name()
+        self._set_dock_icon()
 
         self._busy = False
         self._anim_timer = None
@@ -98,6 +100,16 @@ class MiotlaApp(rumps.App):
     def _anim_tick(self, _timer) -> None:
         self.icon = SWEEP_FRAMES[self._anim_i % len(SWEEP_FRAMES)]
         self._anim_i += 1
+
+    def _set_dock_icon(self) -> None:
+        """Ładna ikona w Docku/Cmd-Tab (pokazuje się, gdy otwarte jest okno)."""
+        try:
+            from AppKit import NSApplication, NSImage
+            if os.path.exists(APP_ICON_PATH):
+                img = NSImage.alloc().initByReferencingFile_(APP_ICON_PATH)
+                NSApplication.sharedApplication().setApplicationIconImage_(img)
+        except Exception:
+            pass
 
     def _bar_color(self, free_mb: int):
         from AppKit import NSColor
