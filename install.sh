@@ -41,12 +41,20 @@ ok "SwiftBar jest zainstalowany."
 # ── 2. Folder wtyczek SwiftBar ──
 PLUGDIR=$(defaults read "$SWIFTBAR_ID" PluginDirectory 2>/dev/null)
 if [ -z "$PLUGDIR" ] || [ ! -d "$PLUGDIR" ]; then
+    DEFAULT_PLUGDIR="$HOME/Library/Application Support/SwiftBar/Plugins"
     err "SwiftBar nie ma ustawionego folderu wtyczek."
-    say "Otwórz SwiftBar → Preferences i wskaż folder na wtyczki, a potem uruchom ten skrypt ponownie."
-    say "(Możesz użyć np. ~/Library/Application Support/SwiftBar/Plugins)"
-    exit 1
+    if ask "Utworzyć i ustawić domyślny folder wtyczek ($DEFAULT_PLUGDIR)?"; then
+        mkdir -p "$DEFAULT_PLUGDIR" || { err "Nie udało się utworzyć folderu."; exit 1; }
+        defaults write "$SWIFTBAR_ID" PluginDirectory -string "$DEFAULT_PLUGDIR"
+        PLUGDIR="$DEFAULT_PLUGDIR"
+        ok "Ustawiono folder wtyczek (SwiftBar odczyta go przy następnym starcie)."
+    else
+        say "Otwórz SwiftBar → Preferences i wskaż folder na wtyczki, a potem uruchom ten skrypt ponownie."
+        exit 1
+    fi
+else
+    ok "Folder wtyczek: $PLUGDIR"
 fi
-ok "Folder wtyczek: $PLUGDIR"
 
 # ── 3. Symlink pluginu ──
 DEST="$PLUGDIR/$PLUGIN_NAME"
