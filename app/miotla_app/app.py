@@ -115,11 +115,33 @@ class MiotlaApp(rumps.App):
         from . import output_window
         callAfter(output_window.show_text, text, title)
 
+    def _bar_color(self, free_mb: int):
+        from AppKit import NSColor
+        if free_mb < RED_GB * 1024:
+            return NSColor.systemRedColor()
+        if free_mb < ORANGE_GB * 1024:
+            return NSColor.systemOrangeColor()
+        return NSColor.labelColor()
+
+    def _set_bar(self, text: str, free_mb: int) -> None:
+        """Ustaw tytuł w pasku z kolorem progowym (atrybutowany tytuł przycisku)."""
+        self.title = text   # zwykły tytuł — spójność rumps + fallback
+        try:
+            button = self._nsapp.nsstatusitem.button()
+            if button is None:
+                return
+            from AppKit import NSAttributedString, NSForegroundColorAttributeName
+            attrs = {NSForegroundColorAttributeName: self._bar_color(free_mb)}
+            button.setAttributedTitle_(
+                NSAttributedString.alloc().initWithString_attributes_(text, attrs))
+        except Exception:
+            pass
+
     def refresh(self, *_args) -> None:
         if self._busy:
             return
         free_mb, used_mb = engine.disk_free_used_mb()
-        self.title = engine.human0(free_mb)
+        self._set_bar(engine.human0(free_mb), free_mb)
         self.status_item.title = (
             f"Wolne: {engine.human(free_mb)}   ·   Zajęte: {engine.human(used_mb)}")
         st = engine.read_state()
