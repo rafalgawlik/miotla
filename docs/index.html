@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Miotła</title>
+<meta name="description" content="Miotła — bezpieczne sprzątanie Maca dewelopera z paska menu. Widzisz wolne miejsce i jednym kliknięciem usuwasz cache, które narzędzia odtworzą same.">
+<meta property="og:title" content="Miotła 🧹">
+<meta property="og:description" content="Bezpieczne sprzątanie Maca dewelopera z paska menu — jednym kliknięciem, w oknie, nie w terminalu.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f6faf8; --bg-soft:#ffffff; --card:#ffffff; --ink:#132018; --muted:#5d6b63;
+    --line:#e3ece7; --accent:#10b981; --accent-2:#34d399; --accent-ink:#065f46;
+    --code-bg:#0f1a15; --code-ink:#d6f5e6; --shadow:0 10px 30px rgba(16,120,80,.10);
+    --radius:18px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0e1411; --bg-soft:#141b17; --card:#161e19; --ink:#edf5f0; --muted:#9bb0a5;
+      --line:#243029; --accent:#34d399; --accent-2:#6ee7b7; --accent-ink:#a7f3d0;
+      --code-bg:#0a0f0c; --code-ink:#d6f5e6; --shadow:0 12px 34px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1411; --bg-soft:#141b17; --card:#161e19; --ink:#edf5f0; --muted:#9bb0a5;
+    --line:#243029; --accent:#34d399; --accent-2:#6ee7b7; --accent-ink:#a7f3d0;
+    --code-bg:#0a0f0c; --code-ink:#d6f5e6; --shadow:0 12px 34px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;}
+  a{color:inherit}
+  .wrap{max-width:1040px; margin:0 auto; padding:0 20px}
+
+  nav{position:sticky; top:0; z-index:20; backdrop-filter:blur(10px);
+      background:color-mix(in srgb, var(--bg) 82%, transparent); border-bottom:1px solid var(--line)}
+  .nav-in{display:flex; align-items:center; justify-content:space-between; height:62px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:-.02em}
+  .brand .b{font-size:22px}
+  .nav-links{display:flex; align-items:center; gap:8px}
+  .btn{display:inline-flex; align-items:center; gap:8px; font-weight:600; text-decoration:none;
+       padding:10px 16px; border-radius:12px; border:1px solid var(--line); background:var(--card);
+       transition:transform .12s ease, box-shadow .12s ease; font-size:14px; cursor:pointer}
+  .btn:hover{transform:translateY(-1px); box-shadow:var(--shadow)}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-2),var(--accent)); color:#04231a;
+       border:none; box-shadow:0 6px 18px rgba(16,185,129,.35)}
+  .btn-ghost{background:transparent}
+  .hide-sm{display:inline-flex}
+
+  header.hero{padding:72px 0 40px}
+  .hero-grid{display:grid; grid-template-columns:1.1fr .9fr; gap:40px; align-items:center}
+  h1{font-size:clamp(34px,5vw,56px); line-height:1.05; letter-spacing:-.03em; margin:0 0 16px}
+  h1 .grad{background:linear-gradient(90deg,var(--accent),var(--accent-2));
+           -webkit-background-clip:text; background-clip:text; color:transparent}
+  .lead{font-size:18px; color:var(--muted); margin:0 0 26px; max-width:46ch}
+  .cta{display:flex; gap:12px; flex-wrap:wrap}
+  .pill{display:inline-block; font-size:13px; font-weight:600; color:var(--accent-ink);
+        background:color-mix(in srgb,var(--accent) 16%, var(--card)); border:1px solid var(--line);
+        padding:6px 12px; border-radius:999px; margin-bottom:18px}
+
+  /* makieta paska menu */
+  .mock{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+        box-shadow:var(--shadow); overflow:hidden}
+  .mbar{display:flex; align-items:center; justify-content:flex-end; gap:16px; padding:8px 14px;
+        background:color-mix(in srgb,var(--ink) 92%, #000); color:#eafff6; font-size:13px}
+  .mbar .free{color:#34d399; font-weight:700}
+  .menu{padding:10px}
+  .menu .row{display:flex; justify-content:space-between; padding:8px 10px; border-radius:10px; font-size:14px}
+  .menu .row:hover{background:color-mix(in srgb,var(--accent) 12%, var(--card))}
+  .menu .sep{height:1px; background:var(--line); margin:6px 4px}
+  .menu .muted{color:var(--muted)}
+
+  section{padding:46px 0}
+  h2{font-size:28px; letter-spacing:-.02em; margin:0 0 8px}
+  .sub{color:var(--muted); margin:0 0 26px}
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+        padding:22px; box-shadow:var(--shadow)}
+  .card .ic{font-size:24px}
+  .card h3{margin:10px 0 6px; font-size:17px}
+  .card p{margin:0; color:var(--muted); font-size:14px}
+
+  .safe{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:18px}
+  .safe .item{display:flex; gap:10px; align-items:flex-start; background:var(--card);
+        border:1px solid var(--line); border-radius:14px; padding:14px 16px}
+  .safe .no{color:#ef4444; font-weight:800}
+
+  pre{background:var(--code-bg); color:var(--code-ink); border-radius:14px; padding:16px 18px;
+      overflow:auto; font-size:13.5px; line-height:1.7}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .steps{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+
+  footer{border-top:1px solid var(--line); padding:30px 0; color:var(--muted); font-size:14px}
+  .foot-in{display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap}
+
+  @media (max-width:820px){
+    .hero-grid{grid-template-columns:1fr} .grid{grid-template-columns:1fr}
+    .safe,.steps{grid-template-columns:1fr} .hide-sm{display:none}
+  }
+</style>
+</head>
+<body>
+<nav><div class="wrap nav-in">
+  <div class="brand"><span class="b">🧹</span> Miotła</div>
+  <div class="nav-links">
+    <a class="btn btn-ghost hide-sm" href="#funkcje">Funkcje</a>
+    <a class="btn btn-ghost hide-sm" href="#bezpieczenstwo">Bezpieczeństwo</a>
+    <a class="btn btn-ghost hide-sm" href="#instalacja">Instalacja</a>
+    <a class="btn btn-primary" href="https://github.com/rafalgawlik/miotla">GitHub</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap hero-grid">
+  <div>
+    <span class="pill">macOS · pasek menu</span>
+    <h1>Posprzątaj Maca <span class="grad">jednym kliknięciem</span></h1>
+    <p class="lead">Miotła pokazuje wolne miejsce w pasku menu i bezpiecznie usuwa cache
+      dewelopera — Docker, Gradle, Xcode, aplikacje Electron, npm/Homebrew — które narzędzia
+      odtworzą same. Wszystko w oknie, nie w terminalu.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#instalacja">Zainstaluj</a>
+      <a class="btn" href="https://github.com/rafalgawlik/miotla">Kod źródłowy</a>
+    </div>
+  </div>
+  <div class="mock" aria-hidden="true">
+    <div class="mbar"><span>🧹 <span class="free">100 GB</span></span></div>
+    <div class="menu">
+      <div class="row"><span>Wolne: 100,5 GB</span><span class="muted">Zajęte: 101 GB</span></div>
+      <div class="sep"></div>
+      <div class="row"><span>Szybkie sprzątanie</span><span class="muted">—auto</span></div>
+      <div class="row"><span>Podgląd (co zostałoby usunięte)</span></div>
+      <div class="row"><span>Pełne sprzątanie…</span><span class="muted">okno</span></div>
+      <div class="sep"></div>
+      <div class="row muted"><span>Ostatnie sprzątanie: dziś, odzyskano 4,2 GB</span></div>
+    </div>
+  </div>
+</div></header>
+
+<section id="funkcje"><div class="wrap">
+  <h2>Co potrafi</h2>
+  <p class="sub">Szybko, bezpiecznie i widocznie.</p>
+  <div class="grid">
+    <div class="card"><div class="ic">📊</div><h3>Wolne miejsce w pasku</h3>
+      <p>Zawsze widzisz, ile zostało. Liczba robi się pomarańczowa poniżej 40 GB i czerwona poniżej 20 GB.</p></div>
+    <div class="card"><div class="ic">⚡</div><h3>Szybkie sprzątanie</h3>
+      <p>Jedno kliknięcie czyści w 100% odtwarzalne cache (biała lista). Zero pytań, działa też w tle.</p></div>
+    <div class="card"><div class="ic">🗂️</div><h3>Pełne sprzątanie w oknie</h3>
+      <p>Checkboxy per pozycja: konkretne emulatory, Archives, stare wersje. Zaznaczasz dokładnie, co usunąć.</p></div>
+    <div class="card"><div class="ic">👀</div><h3>Zawsze najpierw podgląd</h3>
+      <p>Tryb „co zostałoby usunięte” pokazuje wszystko, nie kasując niczego.</p></div>
+    <div class="card"><div class="ic">🧹</div><h3>Animowana miotełka</h3>
+      <p>Ikona zamiata w pasku, gdy trwa sprzątanie. Drobiazg, a miło.</p></div>
+    <div class="card"><div class="ic">🔑</div><h3>Rzeczy systemowe</h3>
+      <p>Snapshoty Time Machine i sleepimage — też z okna, z natywnym pytaniem o hasło administratora.</p></div>
+  </div>
+</div></section>
+
+<section id="bezpieczenstwo"><div class="wrap">
+  <h2>Czego Miotła nigdy nie rusza</h2>
+  <p class="sub">Kasuje wyłącznie w katalogu domowym. Nigdy nie dotyka Twoich danych.</p>
+  <div class="safe">
+    <div class="item"><span class="no">✕</span><div><strong>Przeglądarek</strong><br>
+      <span class="muted">Brave, Chrome, Firefox, Safari, Arc, Edge — profile i dane zostają.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Signala i WhatsAppa</strong><br>
+      <span class="muted">Komunikatory i ich bazy są nietykalne.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>gradle.properties</strong><br>
+      <span class="muted">Twoja konfiguracja Gradle (klucze, tokeny) zostaje.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Ustawień Claude Code</strong><br>
+      <span class="muted">Logowanie i ustawienia (~/.claude) bez zmian.</span></div></div>
+  </div>
+</div></section>
+
+<section id="instalacja"><div class="wrap">
+  <h2>Instalacja</h2>
+  <p class="sub">Przez Homebrew albo ze źródeł.</p>
+  <div class="steps">
+    <div>
+      <h3>Homebrew (zalecane)</h3>
+      <pre><code>brew install rafalgawlik/tap/miotla
+brew services start miotla</code></pre>
+      <p class="sub">Apka pojawi się w pasku menu i wstanie po zalogowaniu.</p>
+    </div>
+    <div>
+      <h3>Ze źródeł</h3>
+      <pre><code>git clone https://github.com/rafalgawlik/miotla
+cd miotla/app
+./run.sh                 # pierwszy raz tworzy środowisko
+./install-autostart.sh   # autostart po zalogowaniu</code></pre>
+      <p class="sub">Potrzebny Python 3 (macOS). Skrypt <code>bin/miotla</code> działa też sam z wiersza poleceń.</p>
+    </div>
+  </div>
+  <p class="sub" style="margin-top:20px">Nadaj aplikacji <strong>Pełny dostęp do dysku</strong>
+    (Ustawienia systemowe → Prywatność i ochrona), żeby widziała m.in. Kosz i cache aplikacji.</p>
+</div></section>
+
+<footer><div class="wrap foot-in">
+  <div>🧹 <strong>Miotła</strong> · bezpieczne sprzątanie Maca dewelopera · MIT</div>
+  <div>Autor: <a href="https://github.com/rafalgawlik">@rafalgawlik</a> ·
+       <a href="https://github.com/rafalgawlik/miotla">Repozytorium</a></div>
+</div></footer>
+
+<script>
+  // Przełącznik motywu zapamiętany w localStorage (z bezpiecznym fallbackiem).
+  (function(){
+    try{
+      var t = localStorage.getItem('miotla-theme');
+      if(t){ document.documentElement.setAttribute('data-theme', t); }
+    }catch(e){}
+  })();
+</script>
+</body>
+</html>

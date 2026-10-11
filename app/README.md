@@ -12,7 +12,23 @@ ten sam skrypt `bin/miotla` i czyta jego wynik (`--json` + plik stanu).
 - **Pełne sprzątanie w Terminalu** — tryb interaktywny (wymaga klawiatury)
 - „Ostatnie sprzątanie”, „Otwórz log”, „O Miotle”
 
-## Uruchomienie
+## Instalacja
+
+### Homebrew (zalecane)
+
+```sh
+brew install rafalgawlik/tap/miotla
+brew services start miotla
+```
+
+Formuła instaluje apkę (venv) **razem ze skryptem `bin/miotla`** (trafia na PATH,
+więc apka go znajduje) — skrypt jest częścią instalacji.
+
+Publikowanie nowej wersji: utwórz release `vX.Y.Z` na GitHubie, policz sha
+(`app/packaging/homebrew/release-sha.sh X.Y.Z`) i skopiuj `miotla.rb` do tapa
+`rafalgawlik/homebrew-tap` (`Formula/miotla.rb`).
+
+### Ze źródeł
 
 ```sh
 cd app

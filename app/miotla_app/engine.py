@@ -19,11 +19,22 @@ VOLUME = "/System/Volumes/Data"
 
 
 def script_path() -> str:
-    """Ścieżka do `bin/miotla`: repo obok apki → ~/.config/miotla/config → domyślna."""
+    """Znajdź skrypt `miotla`. Kolejność:
+    1) kopia dołączona do pakietu (miotla_app/bin/miotla) — apka samodzielna,
+    2) repo obok apki (tryb deweloperski),
+    3) `miotla` na PATH (instalacja Homebrew),
+    4) SCRIPT z ~/.config/miotla/config,
+    5) ścieżka domyślna.
+    """
+    import shutil
     here = os.path.dirname(os.path.abspath(__file__))
-    cand = os.path.normpath(os.path.join(here, "..", "..", "bin", "miotla"))
-    if os.path.exists(cand):
-        return cand
+    for cand in (os.path.join(here, "bin", "miotla"),
+                 os.path.normpath(os.path.join(here, "..", "..", "bin", "miotla"))):
+        if os.path.exists(cand):
+            return cand
+    on_path = shutil.which("miotla")
+    if on_path:
+        return on_path
     cfg = os.path.join(HOME, ".config", "miotla", "config")
     try:
         for line in open(cfg):
