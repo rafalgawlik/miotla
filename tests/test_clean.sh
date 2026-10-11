@@ -68,6 +68,15 @@ assert_out_lacks '"desc":"Gradle 9.0'                 "scan: najnowszy Gradle NI
 assert_out_has '"desc":"Emulator Pixel"'              "scan: emulator Pixel na liście"
 cleanup_sandbox
 
+# ── nowe kategorie: DeviceSupport, cache narzędzi w ~ ──
+new_sandbox; make_pgrep ""
+mkdir_mb "$FAKE_HOME/Library/Developer/Xcode/iOS DeviceSupport/17.0" 2
+mkdir_mb "$FAKE_HOME/.sometool/cache" 2
+run_miotla --scan=xcode_devicesupport,home_tool_caches --json
+assert_out_has '"iOS DeviceSupport/17.0"'  "scan: DeviceSupport na liście"
+assert_out_has '.sometool/cache'           "scan: cache narzędzia w ~ na liście"
+cleanup_sandbox
+
 # ── --clean-items usuwa dokładnie wskazane ścieżki; strażnik $HOME ──
 new_sandbox; make_pgrep ""
 mkdir_mb "$FAKE_HOME/.android/avd/Pixel.avd" 2

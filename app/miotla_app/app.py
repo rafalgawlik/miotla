@@ -55,7 +55,6 @@ class MiotlaApp(rumps.App):
         self.quick_item = rumps.MenuItem("Szybkie sprzątanie", callback=self.quick_clean)
         self.preview_item = rumps.MenuItem("Podgląd (co zostałoby usunięte)", callback=self.preview)
         self.full_item = rumps.MenuItem("Pełne sprzątanie…", callback=self.full_clean_window)
-        self.term_item = rumps.MenuItem("Interaktywne (Terminal)…", callback=self.full_terminal)
         self.last_item = rumps.MenuItem("Ostatnie sprzątanie: —")
         self.log_item = rumps.MenuItem("Otwórz log", callback=self.open_log)
 
@@ -65,7 +64,6 @@ class MiotlaApp(rumps.App):
             self.quick_item,
             self.preview_item,
             self.full_item,
-            self.term_item,
             None,
             self.last_item,
             self.log_item,

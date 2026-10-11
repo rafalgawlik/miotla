@@ -1051,7 +1051,8 @@ run_auto() {
 # Kategorie bezpieczne do usuwania wsadowego (tylko ścieżki w $HOME, bez sudo,
 # bez wyborów per sztuka). Groźne rzeczy (konkretne emulatory, Archives,
 # snapshoty, sudo) zostają w trybie interaktywnym.
-CLEAN_CATS="npm_yarn xcode_derived xcode_caches electron dart cache_dir \
+CLEAN_CATS="npm_yarn xcode_derived xcode_caches xcode_devicesupport electron dart cache_dir \
+app_caches diagnostic_reports home_tool_caches project_builds \
 gradle_dists gradle_all konan_old claude_old ide_old \
 android_emulators android_images ndk xcode_archives trash \
 tm_snapshots sleepimage"
@@ -1061,9 +1062,14 @@ cat_label() {
         npm_yarn)          echo "npm + Yarn (cache)" ;;
         xcode_derived)     echo "Xcode DerivedData" ;;
         xcode_caches)      echo "Cache Xcode / SPM / CocoaPods / symulatorów" ;;
+        xcode_devicesupport) echo "Symbole urządzeń Xcode (DeviceSupport)" ;;
         electron)          echo "Cache aplikacji Electron (pomija uruchomione)" ;;
         dart)              echo "Dart/Flutter (.dartServer, .pub-cache)" ;;
         cache_dir)         echo "~/.cache" ;;
+        app_caches)        echo "Duże cache aplikacji (~/Library/Caches)" ;;
+        diagnostic_reports) echo "Raporty crashy (DiagnosticReports)" ;;
+        home_tool_caches)  echo "Cache i logi narzędzi w ~ (ukryte katalogi)" ;;
+        project_builds)    echo "Wyniki buildów w projektach (build/, .gradle/)" ;;
         gradle_dists)      echo "Starsze dystrybucje Gradle" ;;
         gradle_all)        echo "Gradle — cały ~/.gradle/caches" ;;
         konan_old)         echo "Starsze toolchainy Kotlin/Native" ;;
@@ -1086,16 +1092,19 @@ cat_warn() {
         android_emulators) echo "Usuwa całe emulatory — ich dane i aplikacje znikną." ;;
         xcode_archives)    echo "Zawierają dSYM — bez nich nie zsymbolikujesz crashy z tych wydań." ;;
         android_images|ndk) echo "Pobiorą się ponownie, gdy projekt ich zażąda." ;;
+        app_caches)        echo "Zamknij te aplikacje przed usunięciem ich cache." ;;
+        xcode_devicesupport) echo "Xcode skopiuje je ponownie po podłączeniu urządzenia z tą wersją systemu." ;;
+        project_builds)    echo "Zbudują się od nowa przy następnym buildzie danego projektu." ;;
         tm_snapshots)      echo "Wymaga hasła administratora. Kopie na dysku Time Machine zostają." ;;
         sleepimage)        echo "Wymaga hasła. Wyłącza hibernację (tylko na komputerze stacjonarnym)." ;;
         *)                 echo "" ;;
     esac
 }
 
-scan_emit() {   # scan_emit ścieżka opis — wypisz "mb<TAB>path<TAB>desc", gdy ≥1 MB
+scan_emit() {   # scan_emit ścieżka opis [min_mb] — wypisz "mb<TAB>path<TAB>desc"
     local mb
     { [ -e "$1" ] || [ -L "$1" ]; } || return 0
-    mb=$(size_mb "$1"); [ "$mb" -ge 1 ] || return 0
+    mb=$(size_mb "$1"); [ "$mb" -ge "${3:-1}" ] || return 0
     printf '%s\t%s\t%s\n' "$mb" "$1" "$2"
 }
 
@@ -1139,7 +1148,7 @@ emit_old_ide() {   # emit_old_ide baza — emituj foldery starszych wersji IDE (
 }
 
 scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
-    local d n v rel img base sdk avd konan dists arch vers launcher active
+    local d n v rel img base sdk avd konan dists arch vers launcher active x plat p root parent
     sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
     avd="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
     konan="${KONAN_DATA_DIR:-$HOME/.konan}"
@@ -1169,6 +1178,50 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
         cache_dir)
             for d in "$HOME/.cache"/*; do
                 [ -d "$d" ] && scan_emit "$d" "~/.cache/$(basename "$d")"
+            done ;;
+        xcode_devicesupport)
+            x="$HOME/Library/Developer/Xcode"
+            for plat in "iOS DeviceSupport" "watchOS DeviceSupport" "tvOS DeviceSupport" "visionOS DeviceSupport"; do
+                for d in "$x/$plat"/*; do
+                    [ -d "$d" ] && scan_emit "$d" "$plat/$(basename "$d")"
+                done
+            done ;;
+        app_caches)
+            for d in "$HOME/Library/Caches"/*; do
+                [ -d "$d" ] || continue
+                n=$(basename "$d")
+                case "$n" in
+                    Google|com.google.Chrome*|BraveSoftware|com.brave.*|Firefox|Mozilla|org.mozilla.*|company.thebrowser.*|Arc) continue ;;
+                    Homebrew|CocoaPods|Yarn|org.swift.swiftpm|JetBrains) continue ;;
+                    com.apple.*|CloudKit|Metadata) continue ;;
+                esac
+                scan_emit "$d" "Caches/$n" 100
+            done
+            scan_emit "$HOME/Library/Application Support/Spotify/PersistentCache" "Spotify PersistentCache" 50 ;;
+        diagnostic_reports)
+            scan_emit "$HOME/Library/Logs/DiagnosticReports" "Raporty crashy (DiagnosticReports)" ;;
+        home_tool_caches)
+            for d in "$HOME"/.[!.]*; do
+                { [ -d "$d" ] && [ ! -L "$d" ]; } || continue
+                case "$(basename "$d")" in
+                    .Trash|.gradle|.android|.konan|.npm|.cache|.local|.claude|.ssh|.gnupg|.docker|.orbstack|.dartServer|.pub-cache) continue ;;
+                esac
+                while IFS= read -r p; do
+                    scan_emit "$p" "$(short "$p")"
+                done < <(find "$d" -maxdepth 3 -type d \( -iname cache -o -iname caches -o -name .cache \
+                            -o -iname logs -o -iname log -o -iname tmp -o -iname temp \) -prune 2>/dev/null)
+            done ;;
+        project_builds)
+            for root in "${PROJECT_ROOTS[@]}"; do
+                [ -d "$root" ] || continue
+                while IFS= read -r d; do
+                    parent=$(dirname "$d")
+                    if [ -f "$parent/build.gradle.kts" ] || [ -f "$parent/build.gradle" ] ||
+                       [ -f "$parent/settings.gradle.kts" ] || [ -f "$parent/settings.gradle" ]; then
+                        scan_emit "$d" "$(short "$d")"
+                    fi
+                done < <(find "$root" -maxdepth 6 \( -name node_modules -o -name .git -o -name Pods \) -prune \
+                            -o -type d \( -name build -o -name .gradle \) -print -prune 2>/dev/null)
             done ;;
         gradle_dists)
             [ -d "$dists" ] || return 0
