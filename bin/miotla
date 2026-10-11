@@ -33,6 +33,7 @@ Użycie: miotla [--auto] [--dry-run] [--json] [--help]
                   cache (biała lista), bez żadnych pytań. Pod SwiftBar.
   -n, --dry-run   pokaż, co zostałoby usunięte, ale niczego nie usuwaj
   -j, --json      (z --auto) wypisz wynik jako JSON zamiast linii RESULT
+  -A, --animate   (z --auto) animuj ikonę miotełki w SwiftBar w trakcie pracy
   -h, --help      ta pomoc
 
 Tryb interaktywny (bez --auto):
@@ -44,11 +45,13 @@ EOF
 DRY_RUN=0
 AUTO=0
 JSON=0
+ANIMATE=0
 for arg in "$@"; do
     case "$arg" in
         -a|--auto) AUTO=1 ;;
         -n|--dry-run) DRY_RUN=1 ;;
         -j|--json) JSON=1 ;;
+        -A|--animate) ANIMATE=1 ;;   # (z --auto) animuj ikonę miotełki w SwiftBar
         -h|--help) usage; exit 0 ;;
         *) echo "Nieznana opcja: $arg"; usage; exit 1 ;;
     esac
@@ -957,6 +960,15 @@ notify() {        # notify "treść"
     osascript -e "display notification \"$1\" with title \"Miotła\"" >/dev/null 2>&1 || true
 }
 
+# Odśwież plugin SwiftBar (napędza animację miotełki). Tylko gdy SwiftBar już
+# działa — żeby przypadkiem nie uruchamiać go przez `open`.
+swiftbar_refresh() {
+    [ "$ANIMATE" -eq 1 ] || return 0
+    command -v open >/dev/null 2>&1 || return 0
+    pgrep -x SwiftBar >/dev/null 2>&1 || return 0
+    open -g "swiftbar://refreshallplugins" >/dev/null 2>&1 || true
+}
+
 emit_result() {   # emit_result status freed_mb free_before free_after
     if [ "$JSON" -eq 1 ]; then
         local arr="" tok
@@ -986,7 +998,16 @@ run_auto() {
         emit_result locked 0 0 0
         return 0
     fi
-    trap 'release_lock; rm -rf "$WORK"' EXIT
+    # Po zwolnieniu locka odśwież pasek, żeby wrócił do stanu bezczynności.
+    trap 'release_lock; rm -rf "$WORK"; swiftbar_refresh' EXIT
+
+    # Animacja „zamiatania” w SwiftBar na czas sprzątania (nie w dry-run).
+    local refresher=""
+    if [ "$ANIMATE" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && pgrep -x SwiftBar >/dev/null 2>&1 &&
+       command -v open >/dev/null 2>&1; then
+        ( while [ -d "$LOCK" ]; do open -g "swiftbar://refreshallplugins" >/dev/null 2>&1; sleep 0.5; done ) &
+        refresher=$!
+    fi
 
     local free_before free_after freed
     free_before=$(disk_free_mb)
@@ -1008,6 +1029,7 @@ run_auto() {
         write_state ok "$freed" "$free_before" "$free_after"
         if [ "$freed" -gt 0 ]; then notify "Odzyskano $(human "$freed")"; else notify "Nic do sprzątania"; fi
     fi
+    [ -n "$refresher" ] && kill "$refresher" 2>/dev/null
     rotate_logs
     emit_result ok "$freed" "$free_before" "$free_after"
     return 0

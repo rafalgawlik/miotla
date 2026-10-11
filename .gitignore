@@ -1,3 +1,4 @@
 .DS_Store
 *.log
 tests/tmp/
+assets/icon_b64.txt
