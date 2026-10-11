@@ -1,11 +1,11 @@
-"""Okno „Pełne sprzątanie" — kategorie z pozycjami i checkboxami (przewijane).
+"""Full-cleanup window — categories with items and checkboxes (scrollable).
 
-Każda kategoria ma nagłówek-checkbox (zaznacza/odznacza swoje pozycje) i wcięte
-pozycje per sztuka. Na dole licznik „Zaznaczono: X" aktualizuje się na żywo,
-w nagłówku „Zaznacz/odznacz wszystko". Nic nie znika do kliknięcia Sprzątaj.
-Bezpieczne cache są domyślnie zaznaczone; groźne (emulatory, Archives, cały
-cache Gradle, Kosz, sudo) — odznaczone i z ⚠. Pozycje „(sudo)" (snapshoty
-Time Machine, sleepimage) usuwa się z natywnym pytaniem o hasło.
+Each category has a header checkbox (toggles all its items) and indented
+per-item checkboxes. A live "Selected: X" counter sits at the bottom, with
+"Select / deselect all" in the header. Nothing is removed until you click Clean.
+Safe caches are checked by default; riskier ones (emulators, Archives, the whole
+Gradle cache, Trash, sudo) are unchecked and marked ⚠. The "(sudo)" items
+(Time Machine snapshots, sleepimage) are removed with a native password prompt.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class _FlippedView(NSView):
         return True
 
 
-def _text(s, x, y, w, *, bold=False, align_right=False):
+def _text(s, x, y, w, *, bold=False):
     lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w, 18))
     lbl.setStringValue_(s)
     lbl.setBezeled_(False)
@@ -51,8 +51,6 @@ def _text(s, x, y, w, *, bold=False, align_right=False):
     lbl.setEditable_(False)
     lbl.setSelectable_(False)
     lbl.setFont_(NSFont.boldSystemFontOfSize_(12) if bold else NSFont.systemFontOfSize_(12))
-    if align_right:
-        lbl.setAlignment_(1)   # NSTextAlignmentRight
     return lbl
 
 
@@ -66,8 +64,8 @@ def _size_txt(path, mb) -> str:
 
 class _CleanController(NSObject):
     def _recount(self):
-        total = sum(int(mb) for g in self.groups for (_p, b, mb) in g["items"] if b.state())
-        self.total_label.setStringValue_(f"Zaznaczono: {engine.human(total)}")
+        total = sum(mb for g in self.groups for (_p, b, mb, _d) in g["items"] if b.state())
+        self.total_label.setStringValue_(f"Selected: {engine.human(total)}")
 
     def recount_(self, _sender):
         self._recount()
@@ -75,25 +73,25 @@ class _CleanController(NSObject):
     def selectGroup_(self, sender):
         for g in self.groups:
             if g["master"] is sender:
-                for (_p, b, _mb) in g["items"]:
+                for (_p, b, _mb, _d) in g["items"]:
                     b.setState_(sender.state())
                 break
         self._recount()
 
     def selectAll_(self, _sender):
-        boxes = [b for g in self.groups for (_p, b, _mb) in g["items"]]
+        boxes = [b for g in self.groups for (_p, b, _mb, _d) in g["items"]]
         target = 0 if boxes and all(b.state() for b in boxes) else 1
         for g in self.groups:
             g["master"].setState_(target)
-            for (_p, b, _mb) in g["items"]:
+            for (_p, b, _mb, _d) in g["items"]:
                 b.setState_(target)
         self._recount()
 
     def clean_(self, _sender):
-        paths = [p for g in self.groups for (p, b, _mb) in g["items"] if b.state()]
+        items = [(p, d) for g in self.groups for (p, b, _mb, d) in g["items"] if b.state()]
         self.window.close()
-        if paths and self.app is not None:
-            self.app.run_selected_clean(paths)
+        if items and self.app is not None:
+            self.app.run_selected_clean(items)
 
     def cancel_(self, _sender):
         self.window.close()
@@ -104,9 +102,9 @@ def show_clean(app, categories) -> None:
     if not categories:
         from . import output_window
         output_window.show_text(
-            "Nie znaleziono nic do wyczyszczenia.\n"
-            "(Szybkie sprzątanie zajmuje się bieżącymi cache na co dzień.)",
-            "Miotła — pełne sprzątanie")
+            "Nothing to clean was found.\n"
+            "(Quick cleanup takes care of everyday caches.)",
+            "Miotła — full cleanup")
         return
 
     ctrl = _CleanController.alloc().init()
@@ -140,15 +138,16 @@ def show_clean(app, categories) -> None:
         items = []
         for it in cat.get("items", []):
             path = it.get("path", "")
-            mb = it.get("mb", 0) or 0
+            mb = int(it.get("mb", 0) or 0)
+            desc = it.get("desc", "")
             box = NSButton.alloc().initWithFrame_(NSMakeRect(32, y, doc_w - 40, 20))
             box.setButtonType_(NSSwitchButton)
-            box.setTitle_(f"{it.get('desc', '')}   ·   {_size_txt(path, mb)}")
+            box.setTitle_(f"{desc}   ·   {_size_txt(path, mb)}")
             box.setState_(1 if default_on else 0)
             box.setTarget_(ctrl)
             box.setAction_(recount)
             doc.addSubview_(box)
-            items.append((path, box, int(mb)))
+            items.append((path, box, mb, desc))
             y += _ROW
         y += 8
         ctrl.groups.append({"master": master, "items": items})
@@ -162,24 +161,22 @@ def show_clean(app, categories) -> None:
     style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
     win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
         rect, style, NSBackingStoreBuffered, False)
-    win.setTitle_("Miotła — pełne sprzątanie")
+    win.setTitle_("Miotła — full cleanup")
     win.setReleasedWhenClosed_(False)
     ctrl.window = win
 
     view = NSView.alloc().initWithFrame_(rect)
 
-    # nagłówek: tytuł + „zaznacz/odznacz wszystko"
-    view.addSubview_(_text("Zaznacz, co usunąć — nic nie zniknie do kliknięcia Sprzątaj.",
+    view.addSubview_(_text("Select what to remove — nothing is deleted until you click Clean.",
                            16, win_h - 30, _W - 210, bold=True))
     all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(_W - 190, win_h - 36, 174, 26))
-    all_btn.setTitle_("Zaznacz / odznacz wszystko")
+    all_btn.setTitle_("Select / deselect all")
     all_btn.setBezelStyle_(NSBezelStyleRounded)
     all_btn.setFont_(NSFont.systemFontOfSize_(11))
     all_btn.setTarget_(ctrl)
     all_btn.setAction_(objc.selector(ctrl.selectAll_, signature=b"v@:@"))
     view.addSubview_(all_btn)
 
-    # lista (przewijana)
     scroll = NSScrollView.alloc().initWithFrame_(
         NSMakeRect(12, footer_h, _W - 24, win_h - header_h - footer_h))
     scroll.setHasVerticalScroller_(True)
@@ -188,20 +185,19 @@ def show_clean(app, categories) -> None:
     scroll.setDocumentView_(doc)
     view.addSubview_(scroll)
 
-    # stopka: Anuluj · licznik · Sprzątaj
     cancel_btn = NSButton.alloc().initWithFrame_(NSMakeRect(16, 12, 100, 32))
-    cancel_btn.setTitle_("Anuluj")
+    cancel_btn.setTitle_("Cancel")
     cancel_btn.setBezelStyle_(NSBezelStyleRounded)
     cancel_btn.setKeyEquivalent_("\x1b")
     cancel_btn.setTarget_(ctrl)
     cancel_btn.setAction_(objc.selector(ctrl.cancel_, signature=b"v@:@"))
     view.addSubview_(cancel_btn)
 
-    ctrl.total_label = _text("Zaznaczono: 0 MB", 126, 20, 180)
+    ctrl.total_label = _text("Selected: 0 MB", 126, 20, 180)
     view.addSubview_(ctrl.total_label)
 
-    clean_btn = NSButton.alloc().initWithFrame_(NSMakeRect(_W - 205, 12, 190, 32))
-    clean_btn.setTitle_("Sprzątaj zaznaczone")
+    clean_btn = NSButton.alloc().initWithFrame_(NSMakeRect(_W - 175, 12, 160, 32))
+    clean_btn.setTitle_("Clean selected")
     clean_btn.setBezelStyle_(NSBezelStyleRounded)
     clean_btn.setKeyEquivalent_("\r")
     clean_btn.setTarget_(ctrl)

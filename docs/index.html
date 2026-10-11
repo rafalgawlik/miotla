@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Miotła</title>
-<meta name="description" content="Miotła — bezpieczne sprzątanie Maca dewelopera z paska menu. Widzisz wolne miejsce i jednym kliknięciem usuwasz cache, które narzędzia odtworzą same.">
+<meta name="description" content="Miotła — safe cleanup for a developer's Mac, right from the menu bar. See free space and reclaim it with one click, removing only caches your tools regenerate.">
 <meta property="og:title" content="Miotła 🧹">
-<meta property="og:description" content="Bezpieczne sprzątanie Maca dewelopera z paska menu — jednym kliknięciem, w oknie, nie w terminalu.">
+<meta property="og:description" content="Safe cleanup for a developer's Mac from the menu bar — one click, in a window, not a terminal.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -109,100 +109,100 @@
 <nav><div class="wrap nav-in">
   <div class="brand"><span class="b">🧹</span> Miotła</div>
   <div class="nav-links">
-    <a class="btn btn-ghost hide-sm" href="#funkcje">Funkcje</a>
-    <a class="btn btn-ghost hide-sm" href="#bezpieczenstwo">Bezpieczeństwo</a>
-    <a class="btn btn-ghost hide-sm" href="#instalacja">Instalacja</a>
+    <a class="btn btn-ghost hide-sm" href="#features">Features</a>
+    <a class="btn btn-ghost hide-sm" href="#safety">Safety</a>
+    <a class="btn btn-ghost hide-sm" href="#install">Install</a>
     <a class="btn btn-primary" href="https://github.com/rafalgawlik/miotla">GitHub</a>
   </div>
 </div></nav>
 
 <header class="hero"><div class="wrap hero-grid">
   <div>
-    <span class="pill">macOS · pasek menu</span>
-    <h1>Posprzątaj Maca <span class="grad">jednym kliknięciem</span></h1>
-    <p class="lead">Miotła pokazuje wolne miejsce w pasku menu i bezpiecznie usuwa cache
-      dewelopera — Docker, Gradle, Xcode, aplikacje Electron, npm/Homebrew — które narzędzia
-      odtworzą same. Wszystko w oknie, nie w terminalu.</p>
+    <span class="pill">macOS · menu bar</span>
+    <h1>Clean up your Mac <span class="grad">with one click</span></h1>
+    <p class="lead">Miotła shows free space in the menu bar and safely removes developer
+      caches — Docker, Gradle, Xcode, Electron apps, npm/Homebrew — that your tools regenerate
+      on their own. All in a window, not a terminal.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="#instalacja">Zainstaluj</a>
-      <a class="btn" href="https://github.com/rafalgawlik/miotla">Kod źródłowy</a>
+      <a class="btn btn-primary" href="#install">Install</a>
+      <a class="btn" href="https://github.com/rafalgawlik/miotla">Source code</a>
     </div>
   </div>
   <div class="mock" aria-hidden="true">
     <div class="mbar"><span>🧹 <span class="free">100 GB</span></span></div>
     <div class="menu">
-      <div class="row"><span>Wolne: 100,5 GB</span><span class="muted">Zajęte: 101 GB</span></div>
+      <div class="row"><span>Free: 100.5 GB</span><span class="muted">Used: 101 GB</span></div>
       <div class="sep"></div>
-      <div class="row"><span>Szybkie sprzątanie</span><span class="muted">—auto</span></div>
-      <div class="row"><span>Podgląd (co zostałoby usunięte)</span></div>
-      <div class="row"><span>Pełne sprzątanie…</span><span class="muted">okno</span></div>
+      <div class="row"><span>Quick cleanup</span><span class="muted">auto</span></div>
+      <div class="row"><span>Preview (what would be removed)</span></div>
+      <div class="row"><span>Full cleanup…</span><span class="muted">window</span></div>
       <div class="sep"></div>
-      <div class="row muted"><span>Ostatnie sprzątanie: dziś, odzyskano 4,2 GB</span></div>
+      <div class="row muted"><span>Last cleanup: today, recovered 4.2 GB</span></div>
     </div>
   </div>
 </div></header>
 
-<section id="funkcje"><div class="wrap">
-  <h2>Co potrafi</h2>
-  <p class="sub">Szybko, bezpiecznie i widocznie.</p>
+<section id="features"><div class="wrap">
+  <h2>What it does</h2>
+  <p class="sub">Fast, safe and visible.</p>
   <div class="grid">
-    <div class="card"><div class="ic">📊</div><h3>Wolne miejsce w pasku</h3>
-      <p>Zawsze widzisz, ile zostało. Liczba robi się pomarańczowa poniżej 40 GB i czerwona poniżej 20 GB.</p></div>
-    <div class="card"><div class="ic">⚡</div><h3>Szybkie sprzątanie</h3>
-      <p>Jedno kliknięcie czyści w 100% odtwarzalne cache (biała lista). Zero pytań, działa też w tle.</p></div>
-    <div class="card"><div class="ic">🗂️</div><h3>Pełne sprzątanie w oknie</h3>
-      <p>Checkboxy per pozycja: konkretne emulatory, Archives, stare wersje. Zaznaczasz dokładnie, co usunąć.</p></div>
-    <div class="card"><div class="ic">👀</div><h3>Zawsze najpierw podgląd</h3>
-      <p>Tryb „co zostałoby usunięte” pokazuje wszystko, nie kasując niczego.</p></div>
-    <div class="card"><div class="ic">🧹</div><h3>Animowana miotełka</h3>
-      <p>Ikona zamiata w pasku, gdy trwa sprzątanie. Drobiazg, a miło.</p></div>
-    <div class="card"><div class="ic">🔑</div><h3>Rzeczy systemowe</h3>
-      <p>Snapshoty Time Machine i sleepimage — też z okna, z natywnym pytaniem o hasło administratora.</p></div>
+    <div class="card"><div class="ic">📊</div><h3>Free space in the bar</h3>
+      <p>Always see how much is left. The number turns orange below 40 GB and red below 20 GB.</p></div>
+    <div class="card"><div class="ic">⚡</div><h3>Quick cleanup</h3>
+      <p>One click clears fully regenerable caches (an allow-list). No questions, works in the background too.</p></div>
+    <div class="card"><div class="ic">🗂️</div><h3>Full cleanup in a window</h3>
+      <p>Per-item checkboxes: specific emulators, Archives, old versions. Pick exactly what to remove.</p></div>
+    <div class="card"><div class="ic">👀</div><h3>Preview first, always</h3>
+      <p>The “what would be removed” mode shows everything without deleting a thing.</p></div>
+    <div class="card"><div class="ic">🧹</div><h3>Animated broom</h3>
+      <p>The icon sweeps in the bar while a cleanup runs. A small thing, but a nice one.</p></div>
+    <div class="card"><div class="ic">🔑</div><h3>System items</h3>
+      <p>Time Machine snapshots and sleepimage — also from the window, with a native admin password prompt.</p></div>
   </div>
 </div></section>
 
-<section id="bezpieczenstwo"><div class="wrap">
-  <h2>Czego Miotła nigdy nie rusza</h2>
-  <p class="sub">Kasuje wyłącznie w katalogu domowym. Nigdy nie dotyka Twoich danych.</p>
+<section id="safety"><div class="wrap">
+  <h2>What Miotła never touches</h2>
+  <p class="sub">It deletes only inside your home folder. It never touches your data.</p>
   <div class="safe">
-    <div class="item"><span class="no">✕</span><div><strong>Przeglądarek</strong><br>
-      <span class="muted">Brave, Chrome, Firefox, Safari, Arc, Edge — profile i dane zostają.</span></div></div>
-    <div class="item"><span class="no">✕</span><div><strong>Signala i WhatsAppa</strong><br>
-      <span class="muted">Komunikatory i ich bazy są nietykalne.</span></div></div>
-    <div class="item"><span class="no">✕</span><div><strong>gradle.properties</strong><br>
-      <span class="muted">Twoja konfiguracja Gradle (klucze, tokeny) zostaje.</span></div></div>
-    <div class="item"><span class="no">✕</span><div><strong>Ustawień Claude Code</strong><br>
-      <span class="muted">Logowanie i ustawienia (~/.claude) bez zmian.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Browsers</strong><br>
+      <span class="muted">Brave, Chrome, Firefox, Safari, Arc, Edge — profiles and data stay.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Messengers</strong><br>
+      <span class="muted">Signal, WhatsApp and their databases are off-limits.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Program configuration</strong><br>
+      <span class="muted">Settings, sign-ins and credentials of your tools and apps are left untouched.</span></div></div>
+    <div class="item"><span class="no">✕</span><div><strong>Your work</strong><br>
+      <span class="muted">Documents, source code and project files are never removed.</span></div></div>
   </div>
 </div></section>
 
-<section id="instalacja"><div class="wrap">
-  <h2>Instalacja</h2>
-  <p class="sub">Przez Homebrew albo ze źródeł.</p>
+<section id="install"><div class="wrap">
+  <h2>Install</h2>
+  <p class="sub">Via Homebrew or from source.</p>
   <div class="steps">
     <div>
-      <h3>Homebrew (zalecane)</h3>
+      <h3>Homebrew (recommended)</h3>
       <pre><code>brew install rafalgawlik/tap/miotla
 brew services start miotla</code></pre>
-      <p class="sub">Apka pojawi się w pasku menu i wstanie po zalogowaniu.</p>
+      <p class="sub">The app appears in the menu bar and starts on login.</p>
     </div>
     <div>
-      <h3>Ze źródeł</h3>
+      <h3>From source</h3>
       <pre><code>git clone https://github.com/rafalgawlik/miotla
 cd miotla/app
-./run.sh                 # pierwszy raz tworzy środowisko
-./install-autostart.sh   # autostart po zalogowaniu</code></pre>
-      <p class="sub">Potrzebny Python 3 (macOS). Skrypt <code>bin/miotla</code> działa też sam z wiersza poleceń.</p>
+./run.sh                 # first run creates the environment
+./install-autostart.sh   # start on login</code></pre>
+      <p class="sub">Needs Python 3 (macOS). The <code>bin/miotla</code> script also works on its own from the command line.</p>
     </div>
   </div>
-  <p class="sub" style="margin-top:20px">Nadaj aplikacji <strong>Pełny dostęp do dysku</strong>
-    (Ustawienia systemowe → Prywatność i ochrona), żeby widziała m.in. Kosz i cache aplikacji.</p>
+  <p class="sub" style="margin-top:20px">Grant the app <strong>Full Disk Access</strong>
+    (System Settings → Privacy &amp; Security) so it can see the Trash and app caches.</p>
 </div></section>
 
 <footer><div class="wrap foot-in">
-  <div>🧹 <strong>Miotła</strong> · bezpieczne sprzątanie Maca dewelopera · MIT</div>
-  <div>Autor: <a href="https://github.com/rafalgawlik">@rafalgawlik</a> ·
-       <a href="https://github.com/rafalgawlik/miotla">Repozytorium</a></div>
+  <div>🧹 <strong>Miotła</strong> · safe cleanup for a developer's Mac · MIT</div>
+  <div>By <a href="https://github.com/rafalgawlik">@rafalgawlik</a> ·
+       <a href="https://github.com/rafalgawlik/miotla">Repository</a></div>
 </div></footer>
 
 <script>

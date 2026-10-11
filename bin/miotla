@@ -1061,42 +1061,42 @@ cat_label() {
     case "$1" in
         npm_yarn)          echo "npm + Yarn (cache)" ;;
         xcode_derived)     echo "Xcode DerivedData" ;;
-        xcode_caches)      echo "Cache Xcode / SPM / CocoaPods / symulatorów" ;;
-        xcode_devicesupport) echo "Symbole urządzeń Xcode (DeviceSupport)" ;;
-        electron)          echo "Cache aplikacji Electron (pomija uruchomione)" ;;
+        xcode_caches)      echo "Xcode / SPM / CocoaPods / simulator caches" ;;
+        xcode_devicesupport) echo "Xcode device symbols (DeviceSupport)" ;;
+        electron)          echo "Electron app caches (skips running apps)" ;;
         dart)              echo "Dart/Flutter (.dartServer, .pub-cache)" ;;
         cache_dir)         echo "~/.cache" ;;
-        app_caches)        echo "Duże cache aplikacji (~/Library/Caches)" ;;
-        diagnostic_reports) echo "Raporty crashy (DiagnosticReports)" ;;
-        home_tool_caches)  echo "Cache i logi narzędzi w ~ (ukryte katalogi)" ;;
-        project_builds)    echo "Wyniki buildów w projektach (build/, .gradle/)" ;;
-        gradle_dists)      echo "Starsze dystrybucje Gradle" ;;
-        gradle_all)        echo "Gradle — cały ~/.gradle/caches" ;;
-        konan_old)         echo "Starsze toolchainy Kotlin/Native" ;;
-        claude_old)        echo "Stare wersje Claude Code" ;;
-        ide_old)           echo "Foldery starszych wersji IDE (Android Studio / JetBrains)" ;;
-        android_emulators) echo "Emulatory Android (AVD)" ;;
-        android_images)    echo "Obrazy systemu Android (nieużywane)" ;;
+        app_caches)        echo "Large app caches (~/Library/Caches)" ;;
+        diagnostic_reports) echo "Crash reports (DiagnosticReports)" ;;
+        home_tool_caches)  echo "Tool caches & logs in ~ (hidden dirs)" ;;
+        project_builds)    echo "Project build outputs (build/, .gradle/)" ;;
+        gradle_dists)      echo "Older Gradle distributions" ;;
+        gradle_all)        echo "Gradle — entire ~/.gradle/caches" ;;
+        konan_old)         echo "Older Kotlin/Native toolchains" ;;
+        claude_old)        echo "Old Claude Code versions" ;;
+        ide_old)           echo "Older IDE version folders (Android Studio / JetBrains)" ;;
+        android_emulators) echo "Android emulators (AVD)" ;;
+        android_images)    echo "Android system images (unused)" ;;
         ndk)               echo "Android NDK" ;;
-        xcode_archives)    echo "Xcode Archives (starsze niż $ARCHIVES_MAX_AGE_DAYS dni)" ;;
-        trash)             echo "Kosz" ;;
-        tm_snapshots)      echo "Lokalne snapshoty Time Machine (sudo)" ;;
-        sleepimage)        echo "sleepimage — plik hibernacji (sudo)" ;;
+        xcode_archives)    echo "Xcode Archives (older than $ARCHIVES_MAX_AGE_DAYS days)" ;;
+        trash)             echo "Trash" ;;
+        tm_snapshots)      echo "Local Time Machine snapshots (sudo)" ;;
+        sleepimage)        echo "sleepimage — hibernation file (sudo)" ;;
         *)                 echo "$1" ;;
     esac
 }
 cat_warn() {
     case "$1" in
-        gradle_all)        echo "Wszystkie zależności pobiorą się od nowa." ;;
-        trash)             echo "Bezpowrotnie usuwa zawartość Kosza." ;;
-        android_emulators) echo "Usuwa całe emulatory — ich dane i aplikacje znikną." ;;
-        xcode_archives)    echo "Zawierają dSYM — bez nich nie zsymbolikujesz crashy z tych wydań." ;;
-        android_images|ndk) echo "Pobiorą się ponownie, gdy projekt ich zażąda." ;;
-        app_caches)        echo "Zamknij te aplikacje przed usunięciem ich cache." ;;
-        xcode_devicesupport) echo "Xcode skopiuje je ponownie po podłączeniu urządzenia z tą wersją systemu." ;;
-        project_builds)    echo "Zbudują się od nowa przy następnym buildzie danego projektu." ;;
-        tm_snapshots)      echo "Wymaga hasła administratora. Kopie na dysku Time Machine zostają." ;;
-        sleepimage)        echo "Wymaga hasła. Wyłącza hibernację (tylko na komputerze stacjonarnym)." ;;
+        gradle_all)        echo "All dependencies will be downloaded again." ;;
+        trash)             echo "Permanently empties the Trash." ;;
+        android_emulators) echo "Removes whole emulators — their data and apps are gone." ;;
+        xcode_archives)    echo "They contain dSYMs — without them you can't symbolicate crashes from those builds." ;;
+        android_images|ndk) echo "Downloaded again when a project needs them." ;;
+        app_caches)        echo "Quit these apps before removing their caches." ;;
+        xcode_devicesupport) echo "Xcode copies them again after you connect a device with that OS version." ;;
+        project_builds)    echo "Rebuilt on the next build of each project." ;;
+        tm_snapshots)      echo "Requires an administrator password. Copies on the Time Machine disk stay." ;;
+        sleepimage)        echo "Requires a password. Disables hibernation (desktop Macs only)." ;;
         *)                 echo "" ;;
     esac
 }
@@ -1199,7 +1199,7 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             done
             scan_emit "$HOME/Library/Application Support/Spotify/PersistentCache" "Spotify PersistentCache" 50 ;;
         diagnostic_reports)
-            scan_emit "$HOME/Library/Logs/DiagnosticReports" "Raporty crashy (DiagnosticReports)" ;;
+            scan_emit "$HOME/Library/Logs/DiagnosticReports" "Crash reports (DiagnosticReports)" ;;
         home_tool_caches)
             for d in "$HOME"/.[!.]*; do
                 { [ -d "$d" ] && [ ! -L "$d" ]; } || continue
@@ -1286,7 +1286,7 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             done < <(find "$arch" -mindepth 1 -maxdepth 1 -type d -mtime +"$ARCHIVES_MAX_AGE_DAYS" 2>/dev/null) ;;
         trash)
             for d in "$HOME/.Trash"/* "$HOME/.Trash"/.[!.]*; do
-                scan_emit "$d" "Kosz/$(basename "$d")"
+                scan_emit "$d" "Trash/$(basename "$d")"
             done ;;
         tm_snapshots)
             # listowanie nie wymaga sudo; usuwanie tak (robi je apka przez osascript)
@@ -1301,7 +1301,7 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             # na laptopie pomijamy (jak tryb interaktywny — hibernacja chroni otwartą pracę)
             pmset -g batt 2>/dev/null | grep -q InternalBattery && return 0
             n=$(stat -f%z "$img" 2>/dev/null || echo 0)
-            printf '%s\t%s\t%s\n' "$((n / 1048576))" "sudo:sleepimage" "sleepimage (plik hibernacji)" ;;
+            printf '%s\t%s\t%s\n' "$((n / 1048576))" "sudo:sleepimage" "sleepimage (hibernation file)" ;;
     esac
 }
 
