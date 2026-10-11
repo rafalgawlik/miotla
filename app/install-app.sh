@@ -53,8 +53,10 @@ ok "Built $APP_NAME.app"
 # --- install into /Applications ---
 rm -rf "$APP"
 cp -R "$ROOT/dist/$APP_NAME.app" "$DEST/"
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-    -f "$APP" 2>/dev/null || true
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+"$LSREG" -u "$ROOT/dist/$APP_NAME.app" 2>/dev/null || true   # don't register the build copy
+"$LSREG" -f "$APP" 2>/dev/null || true
+rm -rf "$ROOT/build" "$ROOT/dist"                            # avoid a Spotlight/Launchpad duplicate
 ok "Installed $APP"
 
 # --- autostart via Login Item (LaunchServices → one instance) ---
