@@ -48,8 +48,10 @@ JSON=0
 ANIMATE=0
 SCAN=0
 CLEAN=0
+CLEAN_ITEMS=0
 SCAN_CATS=""
 CLEAN_TOKENS=""
+CLEAN_ITEMS_FILE=""
 for arg in "$@"; do
     case "$arg" in
         -a|--auto) AUTO=1 ;;
@@ -59,6 +61,7 @@ for arg in "$@"; do
         --scan) SCAN=1 ;;            # wypisz kategorie z rozmiarami (JSON), nic nie usuwaj
         --scan=*) SCAN=1; SCAN_CATS="${arg#*=}" ;;
         --clean=*) CLEAN=1; CLEAN_TOKENS="${arg#*=}" ;;   # usuń wybrane kategorie (lista po przecinku)
+        --clean-items=*) CLEAN_ITEMS=1; CLEAN_ITEMS_FILE="${arg#*=}" ;;  # usuń ścieżki z pliku (po jednej na linię)
         -h|--help) usage; exit 0 ;;
         *) echo "Nieznana opcja: $arg"; usage; exit 1 ;;
     esac
@@ -1048,26 +1051,39 @@ run_auto() {
 # Kategorie bezpieczne do usuwania wsadowego (tylko ścieżki w $HOME, bez sudo,
 # bez wyborów per sztuka). Groźne rzeczy (konkretne emulatory, Archives,
 # snapshoty, sudo) zostają w trybie interaktywnym.
-CLEAN_CATS="npm_yarn gradle_all xcode_derived xcode_caches electron dart cache_dir trash"
+CLEAN_CATS="npm_yarn xcode_derived xcode_caches electron dart cache_dir \
+gradle_dists gradle_all konan_old claude_old ide_old \
+android_emulators android_images ndk xcode_archives trash"
 
 cat_label() {
     case "$1" in
-        npm_yarn)      echo "npm + Yarn (cache)" ;;
-        gradle_all)    echo "Gradle — cały ~/.gradle/caches" ;;
-        xcode_derived) echo "Xcode DerivedData" ;;
-        xcode_caches)  echo "Cache Xcode / SPM / CocoaPods / symulatorów" ;;
-        electron)      echo "Cache aplikacji Electron (pomija uruchomione)" ;;
-        dart)          echo "Dart/Flutter (.dartServer, .pub-cache)" ;;
-        cache_dir)     echo "~/.cache" ;;
-        trash)         echo "Kosz" ;;
-        *)             echo "$1" ;;
+        npm_yarn)          echo "npm + Yarn (cache)" ;;
+        xcode_derived)     echo "Xcode DerivedData" ;;
+        xcode_caches)      echo "Cache Xcode / SPM / CocoaPods / symulatorów" ;;
+        electron)          echo "Cache aplikacji Electron (pomija uruchomione)" ;;
+        dart)              echo "Dart/Flutter (.dartServer, .pub-cache)" ;;
+        cache_dir)         echo "~/.cache" ;;
+        gradle_dists)      echo "Starsze dystrybucje Gradle" ;;
+        gradle_all)        echo "Gradle — cały ~/.gradle/caches" ;;
+        konan_old)         echo "Starsze toolchainy Kotlin/Native" ;;
+        claude_old)        echo "Stare wersje Claude Code" ;;
+        ide_old)           echo "Foldery starszych wersji IDE (Android Studio / JetBrains)" ;;
+        android_emulators) echo "Emulatory Android (AVD)" ;;
+        android_images)    echo "Obrazy systemu Android (nieużywane)" ;;
+        ndk)               echo "Android NDK" ;;
+        xcode_archives)    echo "Xcode Archives (starsze niż $ARCHIVES_MAX_AGE_DAYS dni)" ;;
+        trash)             echo "Kosz" ;;
+        *)                 echo "$1" ;;
     esac
 }
 cat_warn() {
     case "$1" in
-        gradle_all) echo "Wszystkie zależności pobiorą się od nowa." ;;
-        trash)      echo "Bezpowrotnie usuwa zawartość Kosza." ;;
-        *)          echo "" ;;
+        gradle_all)        echo "Wszystkie zależności pobiorą się od nowa." ;;
+        trash)             echo "Bezpowrotnie usuwa zawartość Kosza." ;;
+        android_emulators) echo "Usuwa całe emulatory — ich dane i aplikacje znikną." ;;
+        xcode_archives)    echo "Zawierają dSYM — bez nich nie zsymbolikujesz crashy z tych wydań." ;;
+        android_images|ndk) echo "Pobiorą się ponownie, gdy projekt ich zażąda." ;;
+        *)                 echo "" ;;
     esac
 }
 
@@ -1098,8 +1114,32 @@ collect_electron() {   # emituj katalogi cache apek Electron (pomija uruchomione
     done
 }
 
+emit_old_ide() {   # emit_old_ide baza — emituj foldery starszych wersji IDE (zostaw najnowszą)
+    local base="$1" d n ver prefix
+    [ -d "$base" ] || return 0
+    : > "$WORK/ide_tmp"
+    for d in "$base"/*; do
+        [ -d "$d" ] || continue
+        n=$(basename "$d")
+        ver=$(printf '%s' "$n" | sed -nE 's/^[A-Za-z]+([0-9]{4}\.[0-9]+(\.[0-9]+)?)$/\1/p')
+        [ -n "$ver" ] || continue
+        prefix=${n%"$ver"}
+        printf '%s\t%s\t%s\n' "$prefix" "$ver" "$n" >> "$WORK/ide_tmp"
+    done
+    cut -f1 "$WORK/ide_tmp" 2>/dev/null | sort -u | while IFS= read -r prefix; do
+        awk -F'\t' -v p="$prefix" '$1 == p { print $2 "\t" $3 }' "$WORK/ide_tmp" | vsort | drop_last 1
+    done | while IFS=$'\t' read -r ver n; do
+        scan_emit "$base/$n" "$(short "$base/$n")"
+    done
+}
+
 scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
-    local d
+    local d n v rel img base sdk avd konan dists arch vers launcher active
+    sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+    avd="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+    konan="${KONAN_DATA_DIR:-$HOME/.konan}"
+    dists="$GRADLE_HOME/wrapper/dists"
+    arch="$HOME/Library/Developer/Xcode/Archives"
     case "$1" in
         npm_yarn)
             scan_emit "$HOME/.npm/_cacache" "npm _cacache"
@@ -1125,8 +1165,71 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             for d in "$HOME/.cache"/*; do
                 [ -d "$d" ] && scan_emit "$d" "~/.cache/$(basename "$d")"
             done ;;
+        gradle_dists)
+            [ -d "$dists" ] || return 0
+            for d in "$dists"/gradle-*; do
+                [ -d "$d" ] || continue
+                n=$(basename "$d")
+                v=$(printf '%s' "$n" | sed -E 's/^gradle-([0-9]+(\.[0-9]+)*).*/\1/')
+                printf '%s\t%s\n' "$v" "$n"
+            done | vsort | drop_last "$KEEP_GRADLE_DISTS" | while IFS=$'\t' read -r v n; do
+                scan_emit "$dists/$n" "Gradle $v ($n)"
+            done ;;
+        konan_old)
+            [ -d "$konan" ] || return 0
+            for d in "$konan"/kotlin-native-*; do
+                [ -d "$d" ] || continue
+                n=$(basename "$d")
+                v=$(printf '%s' "$n" | sed -E 's/^kotlin-native-(prebuilt-)?[^-]+-[^-]+-//')
+                printf '%s\t%s\n' "$v" "$n"
+            done | vsort | drop_last "$KEEP_KONAN" | while IFS=$'\t' read -r v n; do
+                scan_emit "$konan/$n" "Kotlin/Native $v"
+            done ;;
+        claude_old)
+            vers="$HOME/.local/share/claude/versions"; launcher="$HOME/.local/bin/claude"
+            { [ -d "$vers" ] && [ -L "$launcher" ]; } || return 0
+            active=$(basename "$(readlink "$launcher")")
+            for d in "$vers"/*; do
+                n=$(basename "$d")
+                case "$n" in [0-9]*.[0-9]*) printf '%s\t%s\n' "$n" "$n" ;; esac
+            done | vsort | drop_last 1 | while IFS=$'\t' read -r v n; do
+                [ "$v" = "$active" ] && continue
+                lsof -t "$vers/$v" >/dev/null 2>&1 && continue
+                scan_emit "$vers/$v" "Claude Code $v"
+            done ;;
+        ide_old)
+            for base in "$HOME/Library/Caches/Google" "$HOME/Library/Application Support/Google" \
+                        "$HOME/Library/Logs/Google" "$HOME/Library/Caches/JetBrains" \
+                        "$HOME/Library/Application Support/JetBrains" "$HOME/Library/Logs/JetBrains"; do
+                emit_old_ide "$base"
+            done ;;
+        android_emulators)
+            { [ -d "$avd" ] && ! pgrep -f 'qemu-system' >/dev/null 2>&1; } || return 0
+            for d in "$avd"/*.avd; do
+                [ -d "$d" ] && scan_emit "$d" "Emulator $(basename "$d" .avd)"
+            done ;;
+        android_images)
+            [ -d "$sdk/system-images" ] || return 0
+            for img in "$sdk"/system-images/*/*/*; do
+                [ -d "$img" ] || continue
+                rel="${img#"$sdk"/}"
+                grep -qsF "$rel" "$avd"/*.avd/config.ini 2>/dev/null && continue
+                scan_emit "$img" "system-image $rel"
+            done ;;
+        ndk)
+            for d in "$sdk"/ndk/*; do
+                [ -d "$d" ] && scan_emit "$d" "NDK $(basename "$d")"
+            done
+            [ -d "$sdk/ndk-bundle" ] && scan_emit "$sdk/ndk-bundle" "NDK (ndk-bundle)" ;;
+        xcode_archives)
+            [ -d "$arch" ] || return 0
+            while IFS= read -r d; do
+                scan_emit "$d" "Archive $(basename "$d")"
+            done < <(find "$arch" -mindepth 1 -maxdepth 1 -type d -mtime +"$ARCHIVES_MAX_AGE_DAYS" 2>/dev/null) ;;
         trash)
-            scan_emit "$HOME/.Trash" "Kosz" ;;
+            for d in "$HOME/.Trash"/* "$HOME/.Trash"/.[!.]*; do
+                scan_emit "$d" "Kosz/$(basename "$d")"
+            done ;;
     esac
 }
 
@@ -1204,12 +1307,54 @@ run_clean() {   # run_clean "token1 token2 ..." — usuń wybrane kategorie (inf
     return 0
 }
 
+run_clean_items() {   # run_clean_items plik — usuń ścieżki z pliku (po jednej na linię)
+    local path desc mb free_before free_after freed log
+    PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; export PATH
+    mkdir -p "$MIOTLA_LOGS" 2>/dev/null || true
+    log="$MIOTLA_LOGS/miotla-$(date '+%Y%m%d-%H%M%S').log"
+    exec > >(tee -a "$log") 2>&1
+
+    if ! acquire_lock; then
+        echo "Miotła już działa (lock) — pomijam."
+        emit_result locked 0 0 0
+        return 0
+    fi
+    trap 'release_lock; rm -rf "$WORK"' EXIT
+
+    free_before=$(disk_free_mb)
+    echo "🧹 Miotła --clean-items$([ "$DRY_RUN" -eq 1 ] && echo ' --dry-run')  $(date '+%Y-%m-%d %H:%M')"
+    echo "Wolne przed: $(human "$free_before")"
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        desc=$(short "$path")
+        mb=$(size_mb "$path")
+        safe_rm "$path" "$desc" "$mb"
+    done < "$1"
+
+    free_after=$(disk_free_mb)
+    freed=$TOTAL_FREED
+    echo "Odzyskane (szacunek): $(human "$freed")  |  wolne po: $(human "$free_after")"
+    if [ "$DRY_RUN" -eq 0 ]; then
+        write_state ok "$freed" "$free_before" "$free_after"
+        if [ "$freed" -gt 0 ]; then notify "Odzyskano $(human "$freed")"; else notify "Nic do sprzątania"; fi
+    fi
+    rotate_logs
+    emit_result ok "$freed" "$free_before" "$free_after"
+    return 0
+}
+
 # ════════════════════════════════════════
 #  START
 # ════════════════════════════════════════
 if [ "$SCAN" -eq 1 ]; then
     cats="${SCAN_CATS:-$CLEAN_CATS}"
     emit_scan_json "${cats//,/ }"
+    exit 0
+fi
+if [ "$CLEAN_ITEMS" -eq 1 ]; then
+    [ -f "$CLEAN_ITEMS_FILE" ] || { echo "Brak pliku: $CLEAN_ITEMS_FILE" >&2; exit 1; }
+    run_clean_items "$CLEAN_ITEMS_FILE"
     exit 0
 fi
 if [ "$CLEAN" -eq 1 ]; then run_clean "${CLEAN_TOKENS//,/ }"; exit 0; fi

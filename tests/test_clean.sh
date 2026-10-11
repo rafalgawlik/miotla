@@ -55,4 +55,32 @@ assert_absent "$FAKE_HOME/.gradle/caches"      "gradle_all: cały caches usunię
 assert_exists "$FAKE_HOME/.gradle/gradle.properties" "gradle_all: gradle.properties zostaje"
 cleanup_sandbox
 
+# ── ryzykowne kategorie per-pozycja: scan emituje tylko „stare/nieużywane" ──
+new_sandbox; make_pgrep ""   # pgrep "" → qemu nie działa
+mkdir_mb "$FAKE_HOME/.android/avd/Pixel.avd" 2
+mkdir_mb "$FAKE_HOME/.android/avd/Tablet.avd" 2
+mkdir_mb "$FAKE_HOME/.gradle/wrapper/dists/gradle-7.0-bin/a" 2
+mkdir_mb "$FAKE_HOME/.gradle/wrapper/dists/gradle-8.9-bin/a" 2
+mkdir_mb "$FAKE_HOME/.gradle/wrapper/dists/gradle-9.0-bin/a" 2
+run_miotla --scan=gradle_dists,android_emulators --json
+assert_out_has '"desc":"Gradle 7.0 (gradle-7.0-bin)"' "scan: stara dystrybucja 7.0 na liście"
+assert_out_lacks '"desc":"Gradle 9.0'                 "scan: najnowszy Gradle NIE na liście"
+assert_out_has '"desc":"Emulator Pixel"'              "scan: emulator Pixel na liście"
+cleanup_sandbox
+
+# ── --clean-items usuwa dokładnie wskazane ścieżki; strażnik $HOME ──
+new_sandbox; make_pgrep ""
+mkdir_mb "$FAKE_HOME/.android/avd/Pixel.avd" 2
+mkdir_mb "$FAKE_HOME/.android/avd/Tablet.avd" 2
+printf '%s\n' "$FAKE_HOME/.android/avd/Pixel.avd" > "$SANDBOX/sel.txt"
+run_miotla "--clean-items=$SANDBOX/sel.txt"
+assert_absent "$FAKE_HOME/.android/avd/Pixel.avd"  "clean-items: Pixel usunięty"
+assert_exists "$FAKE_HOME/.android/avd/Tablet.avd" "clean-items: Tablet (niewskazany) zostaje"
+# ścieżka spoza $HOME — odmowa
+printf '/etc/hosts\n' > "$SANDBOX/evil.txt"
+run_miotla "--clean-items=$SANDBOX/evil.txt"
+assert_out_has "Odmowa"                            "clean-items: odmowa dla ścieżki spoza HOME"
+assert_exists "/etc/hosts"                         "clean-items: /etc/hosts nietknięte"
+cleanup_sandbox
+
 finish
