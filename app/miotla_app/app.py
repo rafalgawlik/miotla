@@ -216,18 +216,51 @@ class MiotlaApp(rumps.App):
         threading.Thread(target=work, daemon=True).start()
 
     def run_selected_clean(self, paths) -> None:
-        """Wywoływane przez okno „Pełne sprzątanie" — usuwa zaznaczone ścieżki."""
-        if not paths or self._busy:
+        """Wywoływane przez okno „Pełne sprzątanie" — usuwa zaznaczone pozycje.
+
+        Rozdziela ścieżki w $HOME (clean_items) od pozycji sudo (clean_sudo
+        z jednym natywnym pytaniem o hasło)."""
+        real = [p for p in paths if not str(p).startswith("sudo:")]
+        sudo = [p for p in paths if str(p).startswith("sudo:")]
+        if not (real or sudo) or self._busy:
             return
         self._set_busy(True)
 
         def work() -> None:
-            _rc, out, summ = engine.clean_items(list(paths))
-            self._set_busy(False)
-            self._notify("Miotła", f"Odzyskano {engine.human(summ.get('freed_mb', 0))}")
-            self._show_window(out, "Miotła — pełne sprzątanie")
+            out = ""
+            freed = 0
+            if real:
+                _rc, o, summ = engine.clean_items(real)
+                out += o
+                try:
+                    freed = int(summ.get("freed_mb", 0))
+                except (TypeError, ValueError):
+                    freed = 0
+            if sudo:
+                # osascript pokaże natywne okno hasła — uruchom na głównym wątku
+                from PyObjCTools.AppHelper import callAfter
+                callAfter(self._run_sudo_then_finish, sudo, out, freed)
+                return
+            self._finish_clean(out, freed)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _run_sudo_then_finish(self, sudo, out, freed) -> None:
+        def work() -> None:
+            _rc, so = engine.clean_sudo(list(sudo))
+            full = (out + "\n\n── sudo ──\n" + so) if out else ("── sudo ──\n" + so)
+            self._finish_clean(full, freed)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_clean(self, out, freed) -> None:
+        self._set_busy(False)
+        if freed:
+            self._notify("Miotła", f"Odzyskano {engine.human(freed)}")
+        else:
+            self._notify("Miotła", "Sprzątanie zakończone")
+        self._show_window(out or "Gotowe.", "Miotła — pełne sprzątanie")
+        from PyObjCTools.AppHelper import callAfter
+        callAfter(self.refresh)
 
     def full_terminal(self, _=None) -> None:
         engine.open_interactive_in_terminal()

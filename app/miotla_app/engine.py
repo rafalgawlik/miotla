@@ -160,6 +160,37 @@ def clean_items(paths: list, dry_run: bool = False) -> tuple[int, str, dict]:
             pass
 
 
+def sudo_shell_cmd(items: list) -> str:
+    """Zbuduj polecenie powłoki dla zaznaczonych pozycji sudo (sentinelowe ścieżki)."""
+    import shlex
+    cmds: list = []
+    for it in items:
+        if it == "sudo:sleepimage":
+            cmds.append("/usr/bin/pmset -a hibernatemode 0")
+            cmds.append("/bin/rm -f /private/var/vm/sleepimage")
+        elif it.startswith("sudo:snapshot:"):
+            date = it.split(":", 2)[2]
+            cmds.append("/usr/bin/tmutil deletelocalsnapshots " + shlex.quote(date))
+    return " ; ".join(cmds)
+
+
+def clean_sudo(items: list) -> tuple[int, str]:
+    """Usuń pozycje wymagające sudo — jedno natywne pytanie o hasło (osascript)."""
+    shell_cmd = sudo_shell_cmd(items)
+    if not shell_cmd:
+        return 0, ""
+    apple = 'do shell script "%s" with administrator privileges' % (
+        shell_cmd.replace("\\", "\\\\").replace('"', '\\"'))
+    try:
+        p = subprocess.run(["osascript", "-e", apple], capture_output=True, text=True)
+        out = (p.stdout or "") + (p.stderr or "")
+        if p.returncode != 0 and "-128" in out:
+            out = "Anulowano (nie podano hasła)."
+        return p.returncode, out or "Gotowe (sudo)."
+    except Exception as exc:  # noqa: BLE001
+        return 1, f"Błąd (sudo): {exc}"
+
+
 def open_interactive_in_terminal() -> None:
     """Pełne, interaktywne sprzątanie wymaga klawiatury → otwórz w Terminalu."""
     subprocess.run(["open", "-a", "Terminal", script_path()], check=False)

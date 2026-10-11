@@ -1053,7 +1053,8 @@ run_auto() {
 # snapshoty, sudo) zostają w trybie interaktywnym.
 CLEAN_CATS="npm_yarn xcode_derived xcode_caches electron dart cache_dir \
 gradle_dists gradle_all konan_old claude_old ide_old \
-android_emulators android_images ndk xcode_archives trash"
+android_emulators android_images ndk xcode_archives trash \
+tm_snapshots sleepimage"
 
 cat_label() {
     case "$1" in
@@ -1073,6 +1074,8 @@ cat_label() {
         ndk)               echo "Android NDK" ;;
         xcode_archives)    echo "Xcode Archives (starsze niż $ARCHIVES_MAX_AGE_DAYS dni)" ;;
         trash)             echo "Kosz" ;;
+        tm_snapshots)      echo "Lokalne snapshoty Time Machine (sudo)" ;;
+        sleepimage)        echo "sleepimage — plik hibernacji (sudo)" ;;
         *)                 echo "$1" ;;
     esac
 }
@@ -1083,6 +1086,8 @@ cat_warn() {
         android_emulators) echo "Usuwa całe emulatory — ich dane i aplikacje znikną." ;;
         xcode_archives)    echo "Zawierają dSYM — bez nich nie zsymbolikujesz crashy z tych wydań." ;;
         android_images|ndk) echo "Pobiorą się ponownie, gdy projekt ich zażąda." ;;
+        tm_snapshots)      echo "Wymaga hasła administratora. Kopie na dysku Time Machine zostają." ;;
+        sleepimage)        echo "Wymaga hasła. Wyłącza hibernację (tylko na komputerze stacjonarnym)." ;;
         *)                 echo "" ;;
     esac
 }
@@ -1230,6 +1235,20 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             for d in "$HOME/.Trash"/* "$HOME/.Trash"/.[!.]*; do
                 scan_emit "$d" "Kosz/$(basename "$d")"
             done ;;
+        tm_snapshots)
+            # listowanie nie wymaga sudo; usuwanie tak (robi je apka przez osascript)
+            tmutil listlocalsnapshotdates / 2>/dev/null \
+                | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}$' \
+                | while IFS= read -r dte; do
+                    printf '%s\t%s\t%s\n' 0 "sudo:snapshot:$dte" "Snapshot $dte"
+                done ;;
+        sleepimage)
+            img=/private/var/vm/sleepimage
+            [ -f "$img" ] || return 0
+            # na laptopie pomijamy (jak tryb interaktywny — hibernacja chroni otwartą pracę)
+            pmset -g batt 2>/dev/null | grep -q InternalBattery && return 0
+            n=$(stat -f%z "$img" 2>/dev/null || echo 0)
+            printf '%s\t%s\t%s\n' "$((n / 1048576))" "sudo:sleepimage" "sleepimage (plik hibernacji)" ;;
     esac
 }
 

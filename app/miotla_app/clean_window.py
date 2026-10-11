@@ -1,10 +1,11 @@
 """Okno „Pełne sprzątanie" — kategorie z pozycjami i checkboxami (przewijane).
 
-Każda kategoria to nagłówek z checkboxem (zaznacza/odznacza wszystkie swoje
-pozycje) i wcięte pozycje z osobnymi checkboxami. Zaznaczasz dokładnie, co
-usunąć, i klikasz „Sprzątaj zaznaczone". Nic nie znika do kliknięcia.
-Bezpieczne cache są domyślnie zaznaczone; groźniejsze (emulatory, Archives,
-cały cache Gradle, Kosz) — odznaczone i z ⚠.
+Każda kategoria ma nagłówek-checkbox (zaznacza/odznacza swoje pozycje) i wcięte
+pozycje per sztuka. Na dole licznik „Zaznaczono: X" aktualizuje się na żywo,
+w nagłówku „Zaznacz/odznacz wszystko". Nic nie znika do kliknięcia Sprzątaj.
+Bezpieczne cache są domyślnie zaznaczone; groźne (emulatory, Archives, cały
+cache Gradle, Kosz, sudo) — odznaczone i z ⚠. Pozycje „(sudo)" (snapshoty
+Time Machine, sleepimage) usuwa się z natywnym pytaniem o hasło.
 """
 from __future__ import annotations
 
@@ -29,11 +30,11 @@ from Foundation import NSObject
 
 from . import engine
 
-_KEEP: list = []     # referencje do okien/kontrolerów
+_KEEP: list = []
 
 _SAFE_ON = {"npm_yarn", "xcode_derived", "xcode_caches", "electron", "dart", "cache_dir"}
-_W = 560
-_MAX_H = 640
+_W = 580
+_MAX_H = 660
 _ROW = 24
 
 
@@ -42,27 +43,54 @@ class _FlippedView(NSView):
         return True
 
 
-def _label(text, x, y, w, *, bold=False):
+def _text(s, x, y, w, *, bold=False, align_right=False):
     lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w, 18))
-    lbl.setStringValue_(text)
+    lbl.setStringValue_(s)
     lbl.setBezeled_(False)
     lbl.setDrawsBackground_(False)
     lbl.setEditable_(False)
     lbl.setSelectable_(False)
     lbl.setFont_(NSFont.boldSystemFontOfSize_(12) if bold else NSFont.systemFontOfSize_(12))
+    if align_right:
+        lbl.setAlignment_(1)   # NSTextAlignmentRight
     return lbl
 
 
+def _size_txt(path, mb) -> str:
+    if mb and int(mb) > 0:
+        return engine.human(mb)
+    if str(path).startswith("sudo:"):
+        return "(sudo)"
+    return engine.human(0)
+
+
 class _CleanController(NSObject):
-    def toggleGroup_(self, sender):
+    def _recount(self):
+        total = sum(int(mb) for g in self.groups for (_p, b, mb) in g["items"] if b.state())
+        self.total_label.setStringValue_(f"Zaznaczono: {engine.human(total)}")
+
+    def recount_(self, _sender):
+        self._recount()
+
+    def selectGroup_(self, sender):
         for g in self.groups:
             if g["master"] is sender:
-                for _p, box in g["items"]:
-                    box.setState_(sender.state())
-                return
+                for (_p, b, _mb) in g["items"]:
+                    b.setState_(sender.state())
+                break
+        self._recount()
+
+    def selectAll_(self, _sender):
+        boxes = [b for g in self.groups for (_p, b, _mb) in g["items"]]
+        target = 0 if boxes and all(b.state() for b in boxes) else 1
+        for g in self.groups:
+            g["master"].setState_(target)
+            for (_p, b, _mb) in g["items"]:
+                b.setState_(target)
+        self._recount()
 
     def clean_(self, _sender):
-        paths = [p for g in self.groups for (p, box) in g["items"] if box.state()]
+        paths = [p for g in self.groups for (p, b, _mb) in g["items"] if b.state()]
         self.window.close()
         if paths and self.app is not None:
             self.app.run_selected_clean(paths)
@@ -85,16 +113,18 @@ def show_clean(app, categories) -> None:
     ctrl.app = app
     ctrl.groups = []
 
-    # dokument (przewijana lista), układany od góry (widok „flipped")
+    sel_group = objc.selector(ctrl.selectGroup_, signature=b"v@:@")
+    recount = objc.selector(ctrl.recount_, signature=b"v@:@")
+
     doc_w = _W - 32
     doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, doc_w, 10))
     y = 6
     for cat in categories:
         token = cat.get("token", "")
         default_on = token in _SAFE_ON
+        warn = cat.get("warn") or ""
         master = NSButton.alloc().initWithFrame_(NSMakeRect(8, y, doc_w - 16, 22))
         master.setButtonType_(NSSwitchButton)
-        warn = cat.get("warn") or ""
         mt = f"{cat.get('label', token)}   ·   {engine.human(cat.get('total_mb', 0))}"
         if warn:
             mt += "   ⚠"
@@ -103,18 +133,22 @@ def show_clean(app, categories) -> None:
         master.setFont_(NSFont.boldSystemFontOfSize_(12))
         master.setState_(1 if default_on else 0)
         master.setTarget_(ctrl)
-        master.setAction_(objc.selector(ctrl.toggleGroup_, signature=b"v@:@"))
+        master.setAction_(sel_group)
         doc.addSubview_(master)
         y += _ROW
 
         items = []
         for it in cat.get("items", []):
+            path = it.get("path", "")
+            mb = it.get("mb", 0) or 0
             box = NSButton.alloc().initWithFrame_(NSMakeRect(32, y, doc_w - 40, 20))
             box.setButtonType_(NSSwitchButton)
-            box.setTitle_(f"{it.get('desc', '')}   ·   {engine.human(it.get('mb', 0))}")
+            box.setTitle_(f"{it.get('desc', '')}   ·   {_size_txt(path, mb)}")
             box.setState_(1 if default_on else 0)
+            box.setTarget_(ctrl)
+            box.setAction_(recount)
             doc.addSubview_(box)
-            items.append((it.get("path", ""), box))
+            items.append((path, box, int(mb)))
             y += _ROW
         y += 8
         ctrl.groups.append({"master": master, "items": items})
@@ -122,8 +156,7 @@ def show_clean(app, categories) -> None:
     doc_h = y + 4
     doc.setFrameSize_((doc_w, doc_h))
 
-    # okno: nagłówek (góra) + lista (środek, przewijana) + przyciski (dół)
-    header_h, footer_h = 40, 52
+    header_h, footer_h = 44, 52
     win_h = min(_MAX_H, header_h + footer_h + doc_h)
     rect = NSMakeRect(0, 0, _W, win_h)
     style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
@@ -134,10 +167,19 @@ def show_clean(app, categories) -> None:
     ctrl.window = win
 
     view = NSView.alloc().initWithFrame_(rect)
-    view.addSubview_(_label(
-        "Zaznacz, co usunąć — nic nie zniknie, dopóki nie klikniesz Sprzątaj.",
-        16, win_h - 28, _W - 32, bold=True))
 
+    # nagłówek: tytuł + „zaznacz/odznacz wszystko"
+    view.addSubview_(_text("Zaznacz, co usunąć — nic nie zniknie do kliknięcia Sprzątaj.",
+                           16, win_h - 30, _W - 210, bold=True))
+    all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(_W - 190, win_h - 36, 174, 26))
+    all_btn.setTitle_("Zaznacz / odznacz wszystko")
+    all_btn.setBezelStyle_(NSBezelStyleRounded)
+    all_btn.setFont_(NSFont.systemFontOfSize_(11))
+    all_btn.setTarget_(ctrl)
+    all_btn.setAction_(objc.selector(ctrl.selectAll_, signature=b"v@:@"))
+    view.addSubview_(all_btn)
+
+    # lista (przewijana)
     scroll = NSScrollView.alloc().initWithFrame_(
         NSMakeRect(12, footer_h, _W - 24, win_h - header_h - footer_h))
     scroll.setHasVerticalScroller_(True)
@@ -145,6 +187,18 @@ def show_clean(app, categories) -> None:
     scroll.setDrawsBackground_(False)
     scroll.setDocumentView_(doc)
     view.addSubview_(scroll)
+
+    # stopka: Anuluj · licznik · Sprzątaj
+    cancel_btn = NSButton.alloc().initWithFrame_(NSMakeRect(16, 12, 100, 32))
+    cancel_btn.setTitle_("Anuluj")
+    cancel_btn.setBezelStyle_(NSBezelStyleRounded)
+    cancel_btn.setKeyEquivalent_("\x1b")
+    cancel_btn.setTarget_(ctrl)
+    cancel_btn.setAction_(objc.selector(ctrl.cancel_, signature=b"v@:@"))
+    view.addSubview_(cancel_btn)
+
+    ctrl.total_label = _text("Zaznaczono: 0 MB", 126, 20, 180)
+    view.addSubview_(ctrl.total_label)
 
     clean_btn = NSButton.alloc().initWithFrame_(NSMakeRect(_W - 205, 12, 190, 32))
     clean_btn.setTitle_("Sprzątaj zaznaczone")
@@ -154,13 +208,7 @@ def show_clean(app, categories) -> None:
     clean_btn.setAction_(objc.selector(ctrl.clean_, signature=b"v@:@"))
     view.addSubview_(clean_btn)
 
-    cancel_btn = NSButton.alloc().initWithFrame_(NSMakeRect(16, 12, 100, 32))
-    cancel_btn.setTitle_("Anuluj")
-    cancel_btn.setBezelStyle_(NSBezelStyleRounded)
-    cancel_btn.setKeyEquivalent_("\x1b")
-    cancel_btn.setTarget_(ctrl)
-    cancel_btn.setAction_(objc.selector(ctrl.cancel_, signature=b"v@:@"))
-    view.addSubview_(cancel_btn)
+    ctrl._recount()
 
     win.setContentView_(view)
     win.center()
