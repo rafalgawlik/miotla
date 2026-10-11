@@ -2,3 +2,8 @@
 *.log
 tests/tmp/
 assets/icon_b64.txt
+
+# apka (Etap 2)
+app/.venv/
+__pycache__/
+*.pyc

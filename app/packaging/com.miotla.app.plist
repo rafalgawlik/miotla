@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent: automatyczny start apki Miotła po zalogowaniu (instalacja ze źródeł).
+  Zamień /PATH/TO/miotla na ścieżkę repo, a potem:
+      cp com.miotla.app.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.miotla.app.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.miotla.app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/PATH/TO/miotla/app/run.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/miotla-app.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/miotla-app.err.log</string>
+</dict>
+</plist>

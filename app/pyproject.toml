@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miotla-app"
+version = "0.1.0"
+description = "macOS menu bar app for Miotła — safe dev-Mac cleanup, shown in a window."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Rafał Gawlik" }]
+keywords = ["macos", "menubar", "cleanup", "developer"]
+dependencies = ["rumps>=0.4.0"]
+
+[project.urls]
+Repository = "https://github.com/rafalgawlik/miotla"
+
+[project.scripts]
+miotla-app = "miotla_app.app:main"
+
+[tool.setuptools]
+packages = ["miotla_app"]
+
+[tool.setuptools.package-data]
+miotla_app = ["assets/*.png"]
