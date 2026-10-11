@@ -7,3 +7,6 @@ assets/icon_b64.txt
 app/.venv/
 __pycache__/
 *.pyc
+app/build/
+app/dist/
+app/miotla_app/assets/app_icon.icns

@@ -329,17 +329,7 @@ def main() -> None:
         print("Miotła — menu bar app. Run with no arguments to show the 🧹 icon.")
         return
 
-    # Single instance: if Miotła.app is already running, just exit.
-    try:
-        from AppKit import NSRunningApplication
-        from Foundation import NSBundle
-        bid = NSBundle.mainBundle().bundleIdentifier()
-        if bid == "com.miotla.app":
-            same = NSRunningApplication.runningApplicationsWithBundleIdentifier_(bid)
-            if same and len(same) > 1:
-                return
-    except Exception:
-        pass
-
+    # Single instance is enforced by LSMultipleInstancesProhibited in the
+    # app bundle's Info.plist, so no in-process guard here.
     _set_app_name()
     MiotlaApp().run()
