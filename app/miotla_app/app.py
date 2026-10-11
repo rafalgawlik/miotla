@@ -123,13 +123,10 @@ class MiotlaApp(rumps.App):
             pass
 
     def _notify(self, title: str, message: str) -> None:
-        import subprocess
-
-        def esc(s: str) -> str:
-            return (s or "").replace("\\", "\\\\").replace('"', '\\"')
-        script = f'display notification "{esc(message)}" with title "{esc(title)}"'
+        # Native rumps notification → shows the app's own icon (the bundle).
+        # (osascript would attribute it to Script Editor with the wrong icon.)
         try:
-            subprocess.run(["osascript", "-e", script], check=False)
+            rumps.notification(message or title, "", "")
         except Exception:
             pass
 

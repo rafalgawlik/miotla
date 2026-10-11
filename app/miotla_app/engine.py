@@ -111,7 +111,7 @@ def _parse_summary(output: str) -> dict:
 
 def run_auto(dry_run: bool = False) -> tuple[int, str, dict]:
     """Uruchom `miotla --auto [--dry-run] --json`. Zwróć (kod, pełne_wyjście, podsumowanie)."""
-    args = [script_path(), "--auto", "--json"]
+    args = [script_path(), "--auto", "--json", "--no-notify"]
     if dry_run:
         args.append("--dry-run")
     try:
@@ -136,7 +136,7 @@ def clean(tokens: list, dry_run: bool = False) -> tuple[int, str, dict]:
     """Usuń wybrane kategorie. Zwróć (kod, pełne_wyjście, podsumowanie)."""
     if not tokens:
         return 0, "", {}
-    args = [script_path(), "--clean=" + ",".join(tokens), "--json"]
+    args = [script_path(), "--clean=" + ",".join(tokens), "--json", "--no-notify"]
     if dry_run:
         args.append("--dry-run")
     try:
@@ -156,7 +156,7 @@ def clean_items(paths: list, dry_run: bool = False) -> tuple[int, str, dict]:
     try:
         with os.fdopen(fd, "w") as f:
             f.write("\n".join(paths) + "\n")
-        args = [script_path(), "--clean-items=" + fn, "--json"]
+        args = [script_path(), "--clean-items=" + fn, "--json", "--no-notify"]
         if dry_run:
             args.append("--dry-run")
         p = subprocess.run(args, capture_output=True, text=True)

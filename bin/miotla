@@ -46,6 +46,7 @@ DRY_RUN=0
 AUTO=0
 JSON=0
 ANIMATE=0
+NO_NOTIFY=0
 SCAN=0
 CLEAN=0
 CLEAN_ITEMS=0
@@ -58,6 +59,7 @@ for arg in "$@"; do
         -n|--dry-run) DRY_RUN=1 ;;
         -j|--json) JSON=1 ;;
         -A|--animate) ANIMATE=1 ;;   # (z --auto) animuj ikonę miotełki w SwiftBar
+        --no-notify) NO_NOTIFY=1 ;;  # nie wysyłaj powiadomienia macOS (robi to apka)
         --scan) SCAN=1 ;;            # wypisz kategorie z rozmiarami (JSON), nic nie usuwaj
         --scan=*) SCAN=1; SCAN_CATS="${arg#*=}" ;;
         --clean=*) CLEAN=1; CLEAN_TOKENS="${arg#*=}" ;;   # usuń wybrane kategorie (lista po przecinku)
@@ -966,6 +968,7 @@ write_state() {   # write_state status freed_mb free_before free_after
 }
 
 notify() {        # notify "treść"
+    [ "$NO_NOTIFY" -eq 1 ] && return 0
     command -v osascript >/dev/null 2>&1 || return 0
     osascript -e "display notification \"$1\" with title \"Miotła\"" >/dev/null 2>&1 || true
 }
