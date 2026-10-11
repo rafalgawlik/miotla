@@ -111,6 +111,31 @@ def run_auto(dry_run: bool = False) -> tuple[int, str, dict]:
         return 1, f"Błąd uruchomienia miotła:\n{exc}", {}
 
 
+def scan(tokens: list | None = None) -> list:
+    """Zeskanuj kategorie (bez usuwania). Zwróć listę dictów kategorii."""
+    arg = "--scan" if not tokens else "--scan=" + ",".join(tokens)
+    try:
+        p = subprocess.run([script_path(), arg], capture_output=True, text=True)
+        return json.loads(p.stdout or "[]")
+    except Exception:
+        return []
+
+
+def clean(tokens: list, dry_run: bool = False) -> tuple[int, str, dict]:
+    """Usuń wybrane kategorie. Zwróć (kod, pełne_wyjście, podsumowanie)."""
+    if not tokens:
+        return 0, "", {}
+    args = [script_path(), "--clean=" + ",".join(tokens), "--json"]
+    if dry_run:
+        args.append("--dry-run")
+    try:
+        p = subprocess.run(args, capture_output=True, text=True)
+        out = (p.stdout or "") + (p.stderr or "")
+        return p.returncode, out, _parse_summary(out)
+    except Exception as exc:  # noqa: BLE001
+        return 1, f"Błąd uruchomienia miotła:\n{exc}", {}
+
+
 def open_interactive_in_terminal() -> None:
     """Pełne, interaktywne sprzątanie wymaga klawiatury → otwórz w Terminalu."""
     subprocess.run(["open", "-a", "Terminal", script_path()], check=False)

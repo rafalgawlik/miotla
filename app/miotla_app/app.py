@@ -54,7 +54,8 @@ class MiotlaApp(rumps.App):
         self.status_item = rumps.MenuItem("Wolne: …")
         self.quick_item = rumps.MenuItem("Szybkie sprzątanie", callback=self.quick_clean)
         self.preview_item = rumps.MenuItem("Podgląd (co zostałoby usunięte)", callback=self.preview)
-        self.full_item = rumps.MenuItem("Pełne sprzątanie w Terminalu…", callback=self.full_terminal)
+        self.full_item = rumps.MenuItem("Pełne sprzątanie…", callback=self.full_clean_window)
+        self.term_item = rumps.MenuItem("Interaktywne (Terminal)…", callback=self.full_terminal)
         self.last_item = rumps.MenuItem("Ostatnie sprzątanie: —")
         self.log_item = rumps.MenuItem("Otwórz log", callback=self.open_log)
 
@@ -64,6 +65,7 @@ class MiotlaApp(rumps.App):
             self.quick_item,
             self.preview_item,
             self.full_item,
+            self.term_item,
             None,
             self.last_item,
             self.log_item,
@@ -196,6 +198,34 @@ class MiotlaApp(rumps.App):
             _rc, out, _summ = engine.run_auto(dry_run=True)
             self._set_busy(False)
             self._show_window(out, "Miotła — podgląd (nic nie usunięto)")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def full_clean_window(self, _=None) -> None:
+        if self._busy:
+            return
+        self._set_busy(True)
+
+        def work() -> None:
+            cats = [c for c in engine.scan() if c.get("total_mb", 0) > 0]
+            self._set_busy(False)
+            from PyObjCTools.AppHelper import callAfter
+            from . import clean_window
+            callAfter(clean_window.show_clean, self, cats)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def run_selected_clean(self, tokens) -> None:
+        """Wywoływane przez okno „Pełne sprzątanie" po kliknięciu Sprzątaj."""
+        if not tokens or self._busy:
+            return
+        self._set_busy(True)
+
+        def work() -> None:
+            _rc, out, summ = engine.clean(list(tokens))
+            self._set_busy(False)
+            self._notify("Miotła", f"Odzyskano {engine.human(summ.get('freed_mb', 0))}")
+            self._show_window(out, "Miotła — pełne sprzątanie")
 
         threading.Thread(target=work, daemon=True).start()
 
