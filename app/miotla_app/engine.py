@@ -122,13 +122,44 @@ def run_auto(dry_run: bool = False) -> tuple[int, str, dict]:
         return 1, f"Błąd uruchomienia miotła:\n{exc}", {}
 
 
-def scan(tokens: list | None = None) -> list:
-    """Zeskanuj kategorie (bez usuwania). Zwróć listę dictów kategorii."""
-    arg = "--scan" if not tokens else "--scan=" + ",".join(tokens)
+last_scan_error = ""
+
+
+def _log_scan_error(msg: str) -> None:
     try:
-        p = subprocess.run([script_path(), arg], capture_output=True, text=True)
-        return json.loads(p.stdout or "[]")
-    except Exception:
+        os.makedirs(LOGS, exist_ok=True)
+        with open(os.path.join(LOGS, "scan-error.log"), "a") as f:
+            f.write(msg.rstrip() + "\n\n")
+    except OSError:
+        pass
+
+
+def scan(tokens: list | None = None) -> list:
+    """Zeskanuj kategorie (bez usuwania). Zwróć listę dictów kategorii.
+
+    Przy błędzie zwraca [] i zapisuje przyczynę w `last_scan_error`
+    (oraz w ~/Library/Logs/miotla/scan-error.log), żeby okno nie udawało,
+    że „nie ma nic do sprzątania".
+    """
+    global last_scan_error
+    last_scan_error = ""
+    arg = "--scan" if not tokens else "--scan=" + ",".join(tokens)
+    script = script_path()
+    try:
+        p = subprocess.run([script, arg], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
+                           stdin=subprocess.DEVNULL)
+        cats = json.loads(p.stdout or "")
+        if not isinstance(cats, list):
+            raise ValueError("unexpected JSON: %r" % type(cats).__name__)
+        return cats
+    except Exception as exc:  # noqa: BLE001
+        detail = ""
+        if "p" in locals():
+            detail = "\nexit code: %s\nstderr:\n%s\nstdout (start):\n%s" % (
+                p.returncode, (p.stderr or "")[-1500:], (p.stdout or "")[:500])
+        last_scan_error = "%s: %s\nscript: %s%s" % (type(exc).__name__, exc, script, detail)
+        _log_scan_error(last_scan_error)
         return []
 
 

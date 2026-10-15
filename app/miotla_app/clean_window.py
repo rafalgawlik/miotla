@@ -101,6 +101,12 @@ def show_clean(app, categories) -> None:
     categories = [c for c in (categories or []) if c.get("items")]
     if not categories:
         from . import output_window
+        if engine.last_scan_error:
+            output_window.show_text(
+                "The scan failed, so the list could not be built.\n\n"
+                + engine.last_scan_error,
+                "Miotła — full cleanup")
+            return
         output_window.show_text(
             "Nothing to clean was found.\n"
             "(Quick cleanup takes care of everyday caches.)",
