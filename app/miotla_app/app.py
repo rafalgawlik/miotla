@@ -72,6 +72,8 @@ class MiotlaApp(rumps.App):
         ]
 
         self.refresh()
+        from . import notifications
+        notifications.setup()                        # ask for notification permission
         self.timer = rumps.Timer(self._tick, 300)   # every 5 min
         self.timer.start()
 
@@ -123,12 +125,8 @@ class MiotlaApp(rumps.App):
             pass
 
     def _notify(self, title: str, message: str) -> None:
-        # Native rumps notification → shows the app's own icon (the bundle).
-        # (osascript would attribute it to Script Editor with the wrong icon.)
-        try:
-            rumps.notification(message or title, "", "")
-        except Exception:
-            pass
+        from . import notifications
+        notifications.notify(message or title)
 
     def _show_window(self, text: str, title: str, links=None) -> None:
         from PyObjCTools.AppHelper import callAfter
