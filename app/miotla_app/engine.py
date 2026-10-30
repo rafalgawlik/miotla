@@ -59,6 +59,19 @@ def disk_free_used_mb() -> tuple[int, int]:
         return 0, 0
 
 
+def disk_purgeable_mb() -> int:
+    """MB „do odzyskania” (purgeable): cache, które macOS sam zwolni, gdy
+    zabraknie miejsca. df liczy je jako zajęte, Finder — jako dostępne."""
+    try:
+        from Foundation import NSURL
+        key = "NSURLVolumeAvailableCapacityForImportantUsageKey"
+        vals, _err = NSURL.fileURLWithPath_(VOLUME).resourceValuesForKeys_error_([key], None)
+        important_mb = int(vals[key]) // (1024 * 1024)
+        return max(0, important_mb - disk_free_used_mb()[0])
+    except Exception:
+        return 0
+
+
 def read_state() -> dict:
     d: dict = {}
     try:

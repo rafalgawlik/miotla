@@ -92,4 +92,44 @@ assert_out_has "Odmowa"                            "clean-items: odmowa dla ści
 assert_exists "/etc/hosts"                         "clean-items: /etc/hosts nietknięte"
 cleanup_sandbox
 
+# ── cache przeglądarek: tylko zamknięte przeglądarki, profile zostają ──
+new_sandbox; make_pgrep "Brave"   # Brave działa, Chrome nie
+mkdir_mb "$FAKE_HOME/Library/Caches/BraveSoftware/Brave-Browser" 2
+mkdir_mb "$FAKE_HOME/Library/Caches/Google/Chrome" 2
+mkdir_mb "$FAKE_HOME/Library/Caches/Google/AndroidStudio2026.1" 2
+mkdir_mb "$FAKE_HOME/Library/Application Support/Google/Chrome/Default" 2
+run_miotla --clean=browser_caches
+assert_absent "$FAKE_HOME/Library/Caches/Google/Chrome"                  "browser: cache zamkniętego Chrome usunięty"
+assert_exists "$FAKE_HOME/Library/Caches/BraveSoftware/Brave-Browser"    "browser: cache działającego Brave zostaje"
+assert_exists "$FAKE_HOME/Library/Caches/Google/AndroidStudio2026.1"     "browser: cache Android Studio nietknięty"
+assert_exists "$FAKE_HOME/Library/Application Support/Google/Chrome/Default" "browser: profil Chrome nietknięty"
+cleanup_sandbox
+
+# ── aktualizacja Dockera: świeża (pobiera się) zostaje, stara znika; cache mediaanalysisd ──
+new_sandbox; make_pgrep ""
+upd="$FAKE_HOME/Library/Application Support/com.docker.install/in_progress"
+media="$FAKE_HOME/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/com.apple.mediaanalysisd"
+mkdir_mb "$upd/Docker.app" 2
+mkdir_mb "$media" 2
+run_miotla --clean=docker_update,media_analysis
+assert_exists "$upd"                               "docker_update: świeże pobieranie zostaje"
+assert_absent "$media"                             "media_analysis: cache usunięty"
+touch -t 202001010000 "$upd"
+run_miotla --clean=docker_update
+assert_absent "$upd"                               "docker_update: stara aktualizacja usunięta"
+cleanup_sandbox
+
+# ── duże katalogi narzędzi: skan pokazuje, pomija nietykalne (.ssh, .gradle…) ──
+new_sandbox; make_pgrep ""
+mkdir_mb "$FAKE_HOME/.bigtool/lib" 3
+mkdir_mb "$FAKE_HOME/.ssh" 3
+mkdir_mb "$FAKE_HOME/.gradle/caches" 3
+mkdir_mb "$FAKE_HOME/.smalltool" 1
+BIG_TOOL_MIN_MB=2 run_miotla --scan=big_tool_dirs
+assert_out_has '"desc":"~/.bigtool"'               "big_tool_dirs: duży katalog na liście"
+assert_out_lacks '.ssh'                            "big_tool_dirs: .ssh pominięte"
+assert_out_lacks '.gradle'                         "big_tool_dirs: .gradle pominięte"
+assert_out_lacks '.smalltool'                      "big_tool_dirs: mały katalog pominięty"
+cleanup_sandbox
+
 finish

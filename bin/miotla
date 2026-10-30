@@ -6,7 +6,8 @@
 #  (Notion, Teams, Claude, VS Code…), Kosz, Claude Code, System Data
 #  dev-node.com / Rafał Gawlik
 #
-#  NIE dotyka: przeglądarek (Brave, Chrome, Firefox, Safari, Arc),
+#  NIE dotyka: danych przeglądarek (profile, hasła, historia — cache
+#  tylko zamkniętych, i tylko na życzenie; Safari wcale),
 #  danych Signala/WhatsAppa, ~/.gradle/gradle.properties,
 #  ustawień i logowania Claude Code.
 #  Nic nie usuwa bez pytania. Kasuje wyłącznie wewnątrz $HOME
@@ -20,6 +21,7 @@ set -uo pipefail
 KEEP_GRADLE_DISTS=2          # ile najnowszych dystrybucji Gradle zostawić
 KEEP_KONAN=2                 # ile najnowszych toolchainów Kotlin/Native zostawić
 ARCHIVES_MAX_AGE_DAYS=180    # Xcode Archives starsze niż tyle dni → do przejrzenia
+BIG_TOOL_MIN_MB="${BIG_TOOL_MIN_MB:-500}"  # od ilu MB ukryty katalog narzędzia w ~ uznajemy za duży
 MIN_SIZE_MB="${MIN_SIZE_MB:-50}"  # mniejsze pozycje pomijamy w listach (env nadpisuje — używają testy)
 # Gdzie szukać projektów (katalogi build/ i .gradle/ w projektach Gradle)
 PROJECT_ROOTS=("$HOME/Projects" "$HOME/Repozytorium" "$HOME/StudioProjects"
@@ -133,6 +135,17 @@ human() {
 }
 short() { case "$1" in "$HOME"*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
 disk_free_mb() { df -m "$HOME" | awk 'NR == 2 { print $4 }'; }
+disk_purgeable_mb() {  # miejsce „purgeable”: dostępne dla ważnych zapisów minus wolne wg df
+    local imp
+    # shellcheck disable=SC2016  # $.NSURL to składnia JXA, nie zmienna powłoki
+    imp=$(osascript -l JavaScript -e 'ObjC.import("Foundation");
+        var k = "NSURLVolumeAvailableCapacityForImportantUsageKey";
+        var v = $.NSURL.fileURLWithPath("/System/Volumes/Data").resourceValuesForKeysError($([k]), null);
+        Math.floor(v.objectForKey(k).js / 1048576)' 2>/dev/null)
+    imp=${imp:-0}
+    imp=$((imp - $(disk_free_mb)))
+    [ "$imp" -gt 0 ] && echo "$imp" || echo 0
+}
 
 vsort() {      # stdin: "wersja<TAB>reszta" → posortowane rosnąco po numerze wersji
     awk -F'\t' '{ n = split($1, p, "."); k = "";
@@ -564,6 +577,20 @@ sec_appcaches() {
 
     ask_rm "$HOME/Library/Logs/DiagnosticReports" "Raporty crashy" \
         "Są tu też crashe Twoich aplikacji z symulatora — zajrzyj, jeśli czegoś szukasz."
+
+    new_list
+    while IFS=$'\t' read -r d n; do
+        add_item "$d" "$n"
+    done < <(browser_caches)
+    review_list "Cache przeglądarek (tylko zamknięte przeglądarki)" \
+        "Znika tylko cache — profile, hasła i historia zostają. Strony pierwszy raz załadują się wolniej."
+
+    if docker_update_stale; then
+        ask_rm "$DOCKER_UPDATE" "Docker Desktop: pobrana aktualizacja" \
+            "Docker pobierze ją ponownie przy instalacji aktualizacji."
+    fi
+    ask_rm "$MEDIA_ANALYSIS" "Cache analizy zdjęć (mediaanalysisd)" \
+        "macOS odbuduje go w tle (przez chwilę trochę CPU)."
     return 0
 }
 
@@ -629,20 +656,18 @@ sec_home_misc() {
     done
     review_list "Cache, logi i pliki tymczasowe w ukrytych katalogach narzędzi"
 
-    # Duże katalogi narzędzi — tylko podgląd, decyzja należy do Ciebie
-    echo "  ${CYAN}Duże ukryte katalogi w ~ (≥ 500 MB) — tylko podgląd, sprawdź sam:${NC}"
-    for d in "$HOME"/.[!.]*; do
-        [ -d "$d" ] && [ ! -L "$d" ] || continue
-        case "$(basename "$d")" in
-            .Trash|.gradle|.android|.konan|.npm|.cache|.local|.claude|.dartServer|.pub-cache) continue ;;
-        esac
+    # Duże katalogi narzędzi — to nie cache: pokazujemy zawartość, usuwasz tylko nieużywane
+    new_list
+    while IFS= read -r d; do
         t=$(size_mb "$d")
-        [ "$t" -ge 500 ] || continue
         printf '    %10s  %s\n' "$(human "$t")" "$(short "$d")"
         du -sm "$d"/* "$d"/.[!.]* 2>/dev/null | sort -rn | head -3 | while read -r mb p; do
             printf '    %10s    └ %s\n' "$(human "$mb")" "$(basename "$p")"
         done
-    done
+        add_item "$d" "$(short "$d")" 0
+    done < <(big_tool_dirs)
+    review_list "Duże ukryte katalogi narzędzi w ~ (≥ 500 MB)" \
+        "To zainstalowane narzędzia i ich dane, nie cache — usuń tylko to, czego już nie używasz."
     return 0
 }
 
@@ -716,7 +741,19 @@ sec_system() {
 }
 
 sec_report() {
-    local mb p f
+    local mb p f purg swap
+    echo "  ${CYAN}Miejsce na dysku:${NC}"
+    printf '    %10s  %s\n' "$(human "$(disk_free_mb)")" "wolne (df)"
+    purg=$(disk_purgeable_mb)
+    if [ "$purg" -ge 1024 ]; then
+        printf '    %10s  %s\n' "$(human "$purg")" "do odzyskania (purgeable) — cache macOS, zwalniane samo przy braku miejsca"
+        print_info "df i większość narzędzi liczą to jako zajęte; Finder pokazuje jako dostępne."
+    fi
+    swap=$(sysctl -n vm.swapusage 2>/dev/null | awk '{ v = $3; sub(/M$/, "", v); sub(/,.*/, "", v); print v + 0 }')
+    if [ "${swap:-0}" -ge 1024 ]; then
+        printf '    %10s  %s\n' "$(human "$swap")" "swap (/System/Volumes/VM) — zwolni się po restarcie"
+    fi
+    echo ""
     echo "  ${CYAN}Największe katalogi w ~ (do 3 poziomów):${NC}"
     du -xm -d 3 "$HOME" 2>/dev/null | sort -rn | head -25 | while read -r mb p; do
         printf '    %10s  %s\n' "$(human "$mb")" "$(short "$p")"
@@ -728,7 +765,7 @@ sec_report() {
     done
     echo ""
     echo "  ${CYAN}Poza katalogiem domowym (bez sudo):${NC}"
-    for p in /opt/homebrew /usr/local /private/var/vm \
+    for p in /opt/homebrew /opt/anaconda3 /opt/miniconda3 /usr/local \
              "$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null)" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" \
              "/private/tmp/claude-$(id -u)"; do
         [ -n "$p" ] && [ -e "$p" ] || continue
@@ -1056,7 +1093,8 @@ run_auto() {
 # snapshoty, sudo) zostają w trybie interaktywnym.
 CLEAN_CATS="npm_yarn xcode_derived xcode_caches xcode_devicesupport electron dart cache_dir \
 app_caches diagnostic_reports home_tool_caches project_builds \
-gradle_dists gradle_all konan_old claude_old ide_old \
+browser_caches docker_update media_analysis \
+gradle_dists gradle_all konan_old claude_old ide_old big_tool_dirs \
 android_emulators android_images ndk xcode_archives trash \
 tm_snapshots sleepimage"
 
@@ -1083,6 +1121,10 @@ cat_label() {
         ndk)               echo "Android NDK" ;;
         xcode_archives)    echo "Xcode Archives (older than $ARCHIVES_MAX_AGE_DAYS days)" ;;
         trash)             echo "Trash" ;;
+        browser_caches)    echo "Browser caches (closed browsers only)" ;;
+        docker_update)     echo "Docker Desktop — downloaded update" ;;
+        media_analysis)    echo "Photo analysis cache (mediaanalysisd)" ;;
+        big_tool_dirs)     echo "Large tool folders in ~ (≥ 500 MB) — review" ;;
         tm_snapshots)      echo "Local Time Machine snapshots (sudo)" ;;
         sleepimage)        echo "sleepimage — hibernation file (sudo)" ;;
         *)                 echo "$1" ;;
@@ -1098,6 +1140,10 @@ cat_warn() {
         app_caches)        echo "Quit these apps before removing their caches." ;;
         xcode_devicesupport) echo "Xcode copies them again after you connect a device with that OS version." ;;
         project_builds)    echo "Rebuilt on the next build of each project." ;;
+        browser_caches)    echo "Only the cache — profiles, passwords and history stay. Pages load slower at first." ;;
+        docker_update)     echo "Docker downloads the update again when you install it." ;;
+        media_analysis)    echo "macOS rebuilds it in the background (some CPU for a while)." ;;
+        big_tool_dirs)     echo "Installed tools and their data, not caches — remove only what you no longer use." ;;
         tm_snapshots)      echo "Requires an administrator password. Copies on the Time Machine disk stay." ;;
         sleepimage)        echo "Requires a password. Disables hibernation (desktop Macs only)." ;;
         *)                 echo "" ;;
@@ -1109,6 +1155,43 @@ scan_emit() {   # scan_emit ścieżka opis [min_mb] — wypisz "mb<TAB>path<TAB>
     { [ -e "$1" ] || [ -L "$1" ]; } || return 0
     mb=$(size_mb "$1"); [ "$mb" -ge "${3:-1}" ] || return 0
     printf '%s\t%s\t%s\n' "$mb" "$1" "$2"
+}
+
+browser_caches() {   # wypisz "ścieżka<TAB>opis" cache przeglądarek (tylko ~/Library/Caches,
+                     # nigdy profile/hasła/historia); pomija przeglądarki, które są uruchomione
+    local c="$HOME/Library/Caches" proc paths p
+    while IFS='|' read -r proc paths; do
+        pgrep -xq "$proc" 2>/dev/null && continue
+        for p in $paths; do
+            p="$c/${p//+/ }"
+            [ -d "$p" ] && printf '%s\t%s\n' "$p" "$proc: Caches/${p#"$c"/}"
+        done
+    done <<'EOF'
+Brave Browser|BraveSoftware com.brave.Browser
+Google Chrome|Google/Chrome com.google.Chrome
+Comet|Comet ai.perplexity.comet
+Arc|Arc company.thebrowser.Browser
+Microsoft Edge|Microsoft+Edge com.microsoft.edgemac
+firefox|Firefox org.mozilla.firefox
+EOF
+}
+
+# Pobrana w tle aktualizacja Docker Desktop (świeżą — < 60 min — pomijamy, może się jeszcze pobierać)
+DOCKER_UPDATE="$HOME/Library/Application Support/com.docker.install/in_progress"
+docker_update_stale() { [ -d "$DOCKER_UPDATE" ] && [ -n "$(find "$DOCKER_UPDATE" -maxdepth 0 -mmin +60 2>/dev/null)" ]; }
+
+# Cache modeli ML usługi analizy zdjęć (mediaanalysisd) — macOS odbuduje go w tle
+MEDIA_ANALYSIS="$HOME/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/com.apple.mediaanalysisd"
+
+# Ukryte katalogi w ~, które obsługują inne kategorie (albo są nietykalne)
+BIG_TOOL_SKIP=".Trash .gradle .android .konan .npm .cache .local .claude .ssh .gnupg .docker .orbstack .dartServer .pub-cache .config .zsh_sessions"
+big_tool_dirs() {   # wypisz "ścieżka" dużych (≥ 500 MB) ukrytych katalogów narzędzi w ~
+    local d
+    for d in "$HOME"/.[!.]*; do
+        { [ -d "$d" ] && [ ! -L "$d" ]; } || continue
+        case " $BIG_TOOL_SKIP " in *" $(basename "$d") "*) continue ;; esac
+        [ "$(size_mb "$d")" -ge "$BIG_TOOL_MIN_MB" ] && printf '%s\n' "$d"
+    done
 }
 
 collect_electron() {   # emituj katalogi cache apek Electron (pomija uruchomione)
@@ -1203,6 +1286,18 @@ scan_category() {   # scan_category token — emituj pozycje (bez usuwania)
             scan_emit "$HOME/Library/Application Support/Spotify/PersistentCache" "Spotify PersistentCache" 50 ;;
         diagnostic_reports)
             scan_emit "$HOME/Library/Logs/DiagnosticReports" "Crash reports (DiagnosticReports)" ;;
+        browser_caches)
+            while IFS=$'\t' read -r p n; do
+                scan_emit "$p" "$n"
+            done < <(browser_caches) ;;
+        docker_update)
+            docker_update_stale && scan_emit "$DOCKER_UPDATE" "Docker Desktop: downloaded update (in_progress)" ;;
+        media_analysis)
+            scan_emit "$MEDIA_ANALYSIS" "Photo analysis ML cache (mediaanalysisd)" ;;
+        big_tool_dirs)
+            while IFS= read -r d; do
+                scan_emit "$d" "$(short "$d")"
+            done < <(big_tool_dirs) ;;
         home_tool_caches)
             for d in "$HOME"/.[!.]*; do
                 { [ -d "$d" ] && [ ! -L "$d" ]; } || continue

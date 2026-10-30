@@ -53,6 +53,7 @@ class MiotlaApp(rumps.App):
         self._anim_i = 0
 
         self.status_item = rumps.MenuItem("Free: …")
+        self.purgeable_item = rumps.MenuItem("Purgeable: —")
         self.quick_item = rumps.MenuItem("Quick cleanup", callback=self.quick_clean)
         self.preview_item = rumps.MenuItem("Preview (what would be removed)", callback=self.preview)
         self.full_item = rumps.MenuItem("Full cleanup…", callback=self.full_clean_window)
@@ -61,6 +62,7 @@ class MiotlaApp(rumps.App):
 
         self.menu = [
             self.status_item,
+            self.purgeable_item,
             None,
             self.quick_item,
             self.preview_item,
@@ -140,6 +142,10 @@ class MiotlaApp(rumps.App):
         self._set_bar(engine.human0(free_mb), free_mb)
         self.status_item.title = (
             f"Free: {engine.human(free_mb)}   ·   Used: {engine.human(used_mb)}")
+        purgeable_mb = engine.disk_purgeable_mb()
+        self.purgeable_item.title = (
+            f"+ {engine.human(purgeable_mb)} purgeable (macOS frees it when needed)"
+            if purgeable_mb >= 1024 else "Purgeable: —")
         st = engine.read_state()
         if st.get("last_run_human"):
             self.last_item.title = (
